@@ -289,4 +289,9 @@ async def verify_handover_otp(
     )
 
     await db.commit()
-    return {"success": True, "message": "Handover verified! Mission completed.", "mission_status": mission.status}
+    return {
+        "success": True,
+        "message": "Handover verified! Mission completed.",
+        "status": mission.status,
+        "mission_status": mission.status
+    }

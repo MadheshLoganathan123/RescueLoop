@@ -2643,7 +2643,15 @@ function Missions({
     }
   ];
 
-  const filtered = missions.filter((m) => {
+  const [missionsList, setMissionsList] = useState<any[]>(missions);
+
+  useEffect(() => {
+    opsApi.getMissions(activeTab, search).then(res => {
+      if (res.data && res.data.length > 0) setMissionsList(res.data);
+    });
+  }, [activeTab, search]);
+
+  const filtered = missionsList.filter((m) => {
     const match = m.id.toLowerCase().includes(search.toLowerCase()) || m.donor.toLowerCase().includes(search.toLowerCase());
     if (activeTab === 'transit') return match && m.status.includes('transit');
     if (activeTab === 'unassigned') return match && (m.status.includes('Needs') || m.status.includes('Unassigned'));
@@ -2728,6 +2736,13 @@ function MissionDetail({
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
 }) { 
+  const [missionData, setMissionData] = useState<any>(null);
+
+  useEffect(() => {
+    opsApi.getMissionDetail('RL-00124').then(res => {
+      if (res.data) setMissionData(res.data);
+    });
+  }, []); 
   return (
     <>
       <PageHead 
