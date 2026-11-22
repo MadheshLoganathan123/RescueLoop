@@ -353,7 +353,7 @@ function Header({
 
   const fetchNotifications = React.useCallback(async () => {
     const res = await notificationsApi.getAll();
-    if (res.data) {
+    if (res.data && Array.isArray(res.data)) {
       setNotifications(res.data);
     }
   }, []);
