@@ -1,1 +1,35 @@
-# Models package
+from backend.app.database import Base
+from backend.app.models.entities import (
+    User,
+    DonorProfile,
+    NgoProfile,
+    VolunteerProfile,
+    Donation,
+    DonationAllocation,
+    Mission,
+    MissionAssignment,
+    MissionEvent,
+    AgentRun,
+    ExceptionRecord,
+    Handover,
+    Notification,
+    AuditLog,
+)
+
+__all__ = [
+    "Base",
+    "User",
+    "DonorProfile",
+    "NgoProfile",
+    "VolunteerProfile",
+    "Donation",
+    "DonationAllocation",
+    "Mission",
+    "MissionAssignment",
+    "MissionEvent",
+    "AgentRun",
+    "ExceptionRecord",
+    "Handover",
+    "Notification",
+    "AuditLog",
+]

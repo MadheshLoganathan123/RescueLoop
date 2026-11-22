@@ -1,14 +1,21 @@
 'use client';
 
 import React, { useMemo, useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { 
   ArrowRight, Bell, CalendarDays, Check, CheckCircle2, ChevronDown, 
   ChevronRight, ClipboardCheck, ClipboardList, Clock, Clock3, Download, 
   ExternalLink, Filter, Heart, Info, Key, Layers, Leaf, MapPin, 
-  Navigation, Package, Phone, Plus, RefreshCw, Search, ShieldCheck, 
-  Sparkles, Truck, Users, Volume2, X 
+  Navigation, Package, Phone, Plus, Radio, RefreshCw, Search, ShieldCheck, 
+  Sparkles, Truck, Upload, Users, Volume2, X 
 } from 'lucide-react';
-import { authApi, donorApi, ngoApi, volunteerApi, opsApi, aiApi } from '../lib/api';
+import { authApi, donorApi, ngoApi, volunteerApi, opsApi, aiApi, notificationsApi, uploadsApi } from '../lib/api';
+import type { MapNode } from '../lib/mapNodes';
+
+const LiveOpsMap = dynamic(() => import('./LiveOpsMap'), {
+  ssr: false,
+  loading: () => <div className="map-fallback">Loading live map…</div>,
+});
 
 type Role = 'donor' | 'ngo' | 'volunteer' | 'ops';
 type Screen = string;
@@ -72,10 +79,11 @@ const navByRole: Record<Role, { label: string; screen: Screen }[]> = {
     { label: 'Delivery History', screen: 'history' }
   ],
   ops: [
-    { label: 'Network Console', screen: 'ops-overview' },
-    { label: 'Mission Queue', screen: 'missions' },
-    { label: 'Inspect Mission', screen: 'mission-detail' },
-    { label: 'Ledger & Audit', screen: 'history' }
+    { label: 'Overview', screen: 'ops-overview' },
+    { label: 'Missions', screen: 'missions' },
+    { label: 'Exceptions', screen: 'exceptions' },
+    { label: 'Network', screen: 'network' },
+    { label: 'Activity', screen: 'activity' },
   ],
 };
 
@@ -340,6 +348,23 @@ function Header({
 }) {
   const meta = roleMeta[role] || roleMeta.donor;
   const navItems = navByRole[role] || navByRole.donor;
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  const fetchNotifications = React.useCallback(async () => {
+    const res = await notificationsApi.getAll();
+    if (res.data) {
+      setNotifications(res.data);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 15000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
 
   return (
     <header className="topbar">
@@ -367,15 +392,77 @@ function Header({
           <Search size={15} />
           <input placeholder="Search missions, food, IDs..." />
         </div>
-        <button 
-          type="button"
-          className="icon-btn" 
-          title="Live alerts" 
-          onClick={() => alert('No critical dispatch bottlenecks currently.')}
-        >
-          <Bell size={18} />
-          <span className="badge-dot" />
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button 
+            type="button"
+            className="icon-btn" 
+            title="Live alerts & notifications" 
+            onClick={() => setShowNotifications(!showNotifications)}
+          >
+            <Bell size={18} />
+            {unreadCount > 0 && <span className="badge-dot" style={{ background: '#ef4444' }} />}
+          </button>
+
+          {showNotifications && (
+            <div style={{
+              position: 'absolute',
+              right: 0,
+              top: '110%',
+              width: 320,
+              background: '#0d1712',
+              border: '1px solid #1f3326',
+              borderRadius: 8,
+              padding: 12,
+              zIndex: 1000,
+              boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, borderBottom: '1px solid #1f3326', paddingBottom: 6 }}>
+                <b style={{ fontSize: 13, color: '#f3f4f6' }}>Notifications ({unreadCount} new)</b>
+                {unreadCount > 0 && (
+                  <button 
+                    onClick={async () => {
+                      await notificationsApi.markAllAsRead();
+                      fetchNotifications();
+                    }}
+                    style={{ background: 'transparent', border: 'none', color: '#10b981', fontSize: 11, cursor: 'pointer' }}
+                  >
+                    Mark all read
+                  </button>
+                )}
+              </div>
+              <div style={{ maxHeight: 250, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {notifications.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: '8px 0', textAlign: 'center' }}>No notifications yet</p>
+                ) : (
+                  notifications.slice(0, 10).map((n) => (
+                    <div 
+                      key={n.id} 
+                      onClick={async () => {
+                        if (!n.is_read) {
+                          await notificationsApi.markAsRead(n.id);
+                          fetchNotifications();
+                        }
+                      }}
+                      style={{
+                        padding: '6px 8px',
+                        background: n.is_read ? '#111f17' : '#193023',
+                        borderRadius: 6,
+                        borderLeft: n.is_read ? '3px solid #374151' : '3px solid #10b981',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#f9fafb' }}>{n.title}</div>
+                      <div style={{ fontSize: 11, color: '#d1d5db', marginTop: 2 }}>{n.message}</div>
+                      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                        {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         <button 
           type="button"
           className="btn btn-sm portal-landing-btn" 
@@ -424,7 +511,12 @@ function Login({
   onLogin: () => void; 
   setRoleAndHome: (r: Role, skipDemo?: boolean) => void;
 }) {
-  const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin');
+  const [authMode, setAuthMode] = useState<'signin' | 'register' | 'forgot' | 'reset'>('signin');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetMessage, setResetMessage] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   // Sign in state
   const [email, setEmail] = useState('');
@@ -510,6 +602,54 @@ function Login({
     }
   };
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const token = new URLSearchParams(window.location.search).get('reset_token');
+    if (token) {
+      setResetToken(token);
+      setAuthMode('reset');
+    }
+  }, []);
+
+  const handleForgotPassword = async () => {
+    setLoginError('');
+    setResetMessage('');
+    if (!resetEmail.trim()) {
+      setLoginError('Enter the email on the account.');
+      return;
+    }
+    setIsResetting(true);
+    const res = await authApi.forgotPassword(resetEmail.trim());
+    setIsResetting(false);
+    if (res.error) {
+      setLoginError(res.error);
+      return;
+    }
+    setResetMessage(res.data?.message || 'If an account exists for that email, a password reset link has been sent.');
+    setAuthMode('reset');
+  };
+
+  const handleResetPassword = async () => {
+    setLoginError('');
+    setResetMessage('');
+    if (resetPassword.length < 8) {
+      setLoginError('Use at least 8 characters for the new password.');
+      return;
+    }
+    setIsResetting(true);
+    const res = await authApi.resetPassword(resetToken.trim(), resetPassword);
+    setIsResetting(false);
+    if (res.error) {
+      setLoginError(res.error);
+      return;
+    }
+    setPassword('');
+    setResetPassword('');
+    setResetToken('');
+    setResetMessage(res.data?.message || 'Password updated. Sign in with the new password.');
+    setAuthMode('signin');
+  };
+
   const handleDemoLogin = async (r: Role) => {
     const res = await authApi.demoLogin(r);
     if (res.error) {
@@ -527,25 +667,38 @@ function Login({
           <b>Rescue<span>Loop</span></b>
         </div>
         <div className="login-links">
-          <a onClick={() => handleDemoLogin('donor')}>Donor Portal</a>
-          <a onClick={() => handleDemoLogin('ngo')}>NGO Receiver</a>
-          <a onClick={() => handleDemoLogin('volunteer')}>Volunteer App</a>
-          <a onClick={() => handleDemoLogin('ops')}>Operations Console</a>
-          <Button primary sm onClick={() => setAuthMode('signin')}>Sign In</Button>
-          <Button secondary sm onClick={() => setAuthMode('register')}>Create Account</Button>
+          <a style={{ fontWeight: 600, color: 'var(--accent)' }} onClick={() => {}}>How it works</a>
+          <a onClick={() => {}}>For organizations</a>
+          <a onClick={() => {}}>Help</a>
+          <a onClick={() => {}}>Contact</a>
+          <Button primary sm onClick={() => setAuthMode('signin')}>Sign in</Button>
         </div>
       </div>
       <div className="login-main">
         <div className="login-copy">
-          <Badge tone="green">Verified Food Rescue Ecosystem</Badge>
-          <h1>Zero Surplus Wasted.<br /><em>Deliver Safe, Dignified Food.</em></h1>
-          <p>
-            RescueLoop connects commercial food kitchens, food banks, community shelters, and trained logistics volunteers in real-time. Automated route optimization and cold-chain compliance ensure safety from pickup to handover.
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 999, padding: '4px 12px', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', color: '#15803d', marginBottom: 20 }}>
+            FOOD RESCUE NETWORK
+          </div>
+          <h1 style={{ lineHeight: 1.2, fontSize: 36, marginBottom: 8 }}>
+            <span style={{ color: '#0f172a' }}>Move surplus food.</span><br />
+            <span style={{ color: 'var(--accent, #16a34a)' }}>Deliver more good.</span>
+          </h1>
+          <p style={{ fontSize: 15, color: '#475569', maxWidth: 420, lineHeight: 1.6, marginBottom: 32 }}>
+            RescueLoop connects food donors, community kitchens, and volunteers to coordinate safe, timely food rescue across your city.
           </p>
           <div className="login-stats">
-            <span><b>4</b> Interconnected Roles</span>
-            <span><b>1,200+</b> Meals Rescued Daily</span>
-            <span><b>28 mins</b> Avg. Dispatch Time</span>
+            <div>
+              <b>4</b>
+              <span>Connected workspaces</span>
+            </div>
+            <div>
+              <b>1</b>
+              <span>Coordinated rescue flow</span>
+            </div>
+            <div>
+              <b>24/7</b>
+              <span>Mission visibility</span>
+            </div>
           </div>
         </div>
 
@@ -587,11 +740,69 @@ function Login({
               </button>
             </div>
 
-            {authMode === 'signin' ? (
+            {authMode === 'forgot' || authMode === 'reset' ? (
               <>
-                <small className="eyebrow">PORTAL AUTHENTICATION</small>
+                <small className="eyebrow">ACCOUNT RECOVERY</small>
+                <h2>{authMode === 'forgot' ? 'Reset your password' : 'Choose a new password'}</h2>
+                <p>We email a one-time token. It expires in 30 minutes and can only be used once.</p>
+                {loginError && (
+                  <div style={{ padding: '8px 12px', background: '#fee2e2', border: '1px solid #f87171', borderRadius: 6, color: '#991b1b', fontSize: 13, marginBottom: 12 }}>
+                    {loginError}
+                  </div>
+                )}
+                {resetMessage && (
+                  <div style={{ padding: '8px 12px', background: '#ecfdf3', border: '1px solid #86efac', borderRadius: 6, color: '#166534', fontSize: 13, marginBottom: 12 }}>
+                    {resetMessage}
+                  </div>
+                )}
+                {authMode === 'forgot' ? (
+                  <>
+                    <Input
+                      label="Work Email Address"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="e.g. director@kitchen.org"
+                    />
+                    <div style={{ marginTop: 16 }}>
+                      <Button primary onClick={handleForgotPassword} disabled={isResetting} className="full">
+                        {isResetting ? 'Sending reset link...' : 'Email reset link'}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <Input
+                      label="Reset token"
+                      value={resetToken}
+                      onChange={(e) => setResetToken(e.target.value)}
+                      placeholder="Paste the token from the email"
+                    />
+                    <label className="field" style={{ marginTop: 12 }}>
+                      <span>New password</span>
+                      <input
+                        type="password"
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                      />
+                    </label>
+                    <div style={{ marginTop: 16 }}>
+                      <Button primary onClick={handleResetPassword} disabled={isResetting} className="full">
+                        {isResetting ? 'Updating password...' : 'Update password'}
+                      </Button>
+                    </div>
+                  </>
+                )}
+                <div style={{ marginTop: 14, textAlign: 'center', fontSize: 13 }}>
+                  <a onClick={() => { setAuthMode('signin'); setLoginError(''); }} style={{ color: '#1b6348', fontWeight: 600, cursor: 'pointer' }}>
+                    Back to sign in
+                  </a>
+                </div>
+              </>
+            ) : authMode === 'signin' ? (
+              <>
+                <small className="eyebrow">WELCOME BACK</small>
                 <h2>Sign in to RescueLoop</h2>
-                <p>Access your organization workspace to post surplus, coordinate receivers, or dispatch rescue missions.</p>
+                <p>Access your workspace to manage donations, offers and rescue missions.</p>
 
                 {loginError && (
                   <div style={{ padding: '8px 12px', background: '#fee2e2', border: '1px solid #f87171', borderRadius: 6, color: '#991b1b', fontSize: 13, marginBottom: 12 }}>
@@ -600,18 +811,24 @@ function Login({
                 )}
 
                 <Input 
-                  label="Work Email Address" 
-                  value={email} 
+                  label="Email address" 
+                  value={email || 'alex@abcrestaurant.com'} 
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. director@kitchen.org"
+                  placeholder="alex@abcrestaurant.com"
                 />
                 <label className="field" style={{ marginTop: 12 }}>
-                  <span>Security Password</span>
-                  <input 
-                    type="password" 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
+                  <span>Password</span>
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      type="password" 
+                      value={password} 
+                      onChange={(e) => setPassword(e.target.value)}
+                      style={{ paddingRight: 56 }}
+                    />
+                    <button type="button" style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', fontSize: 12, color: '#64748b', cursor: 'pointer', fontWeight: 600 }}>
+                      Show
+                    </button>
+                  </div>
                 </label>
 
                 <div className="between" style={{ marginTop: 14, marginBottom: 18 }}>
@@ -621,23 +838,28 @@ function Login({
                       checked={remember} 
                       onChange={(e) => setRemember(e.target.checked)} 
                     />
-                    <span>Remember this terminal</span>
+                    <span>Remember me</span>
                   </label>
-                  <a onClick={() => alert('Password reset link sent to demo registered email.')} style={{ cursor: 'pointer' }}>Forgot password?</a>
+                  <a onClick={() => { setAuthMode('forgot'); setLoginError(''); setResetEmail(email); }} style={{ cursor: 'pointer' }}>Forgot password?</a>
                 </div>
 
                 <Button primary onClick={handleCustomLogin} disabled={isLoggingIn} className="full">
-                  {isLoggingIn ? 'Verifying Credentials...' : 'Enter Workspace'} <ArrowRight size={16} />
+                  {isLoggingIn ? 'Verifying Credentials...' : 'Sign in to workspace'} <ArrowRight size={16} />
                 </Button>
 
                 <div style={{ marginTop: 14, textAlign: 'center', fontSize: 13, color: '#64748b' }}>
-                  Need to register your organization?{' '}
+                  New to RescueLoop?{' '}
                   <a onClick={() => { setAuthMode('register'); setRegError(''); }} style={{ color: '#1b6348', fontWeight: 600, cursor: 'pointer' }}>
-                    Create Account
+                    Request organization access
                   </a>
                 </div>
 
-                <div className="demo-account-pills">
+                <div style={{ marginTop: 16, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#64748b' }}>
+                  <b style={{ display: 'block', marginBottom: 4, color: '#334155' }}>Hackathon demo access</b>
+                  Use the workspace switcher at the bottom of any screen to explore all four roles — Donor, NGO, Volunteer, and Operations — without credentials.
+                </div>
+
+                <div className="demo-account-pills" style={{ marginTop: 16 }}>
                   <p>QUICK 1-CLICK DEMO LOGIN (SELECT ROLE):</p>
                   <div className="demo-role-buttons">
                     <button className="demo-role-btn" onClick={() => handleDemoLogin('donor')}>
@@ -860,34 +1082,34 @@ function DonorOverview({
         subtitle="ABC Restaurant Group · Anna Nagar Central Kitchen. All health & temperature logs are current." 
         action={
           <Button primary onClick={() => setScreen('create-donation')}>
-            <Plus size={16} /> Create New Surplus Donation
+            <Plus size={16} /> + Create donation
           </Button>
         }
       />
 
       <div className="stats-grid">
         <Stat 
-          label="Total Donations Rescued" 
-          value={stats ? `${stats.total_donations}` : "—"} 
-          note="+6 this month (100% verified)" 
+          label="TOTAL DONATIONS" 
+          value={stats ? `${stats.total_donations}` : "48"} 
+          note="+6 this month" 
           icon={<Package size={18} />} 
         />
         <Stat 
-          label="Meals Redistribution" 
-          value={stats ? `${stats.total_meals_rescued?.toLocaleString()}` : "—"} 
-          note="Fed 14 local community shelters" 
+          label="MEALS REDISTRIBUTED" 
+          value={stats ? `${stats.total_meals_rescued?.toLocaleString()}` : "2,840"} 
+          note="Across 19 completed missions" 
           icon={<CheckCircle2 size={18} />} 
         />
         <Stat 
-          label="Active Missions Today" 
-          value={stats ? `${stats.active_missions}` : "—"} 
-          note="2 awaiting pickup, 1 in transit" 
+          label="ACTIVE DONATIONS" 
+          value={stats ? `${stats.active_missions}` : "3"} 
+          note="2 awaiting pickup" 
           icon={<Clock3 size={18} />} 
         />
         <Stat 
-          label="Pending Logistics Action" 
-          value={stats ? `${stats.pending_actions}` : "—"} 
-          note="Review courier arrival time" 
+          label="PENDING ACTIONS" 
+          value={stats ? `${stats.pending_actions}` : "1"} 
+          note="Review pickup details" 
           icon={<Bell size={18} />} 
         />
       </div>
@@ -904,33 +1126,60 @@ function DonorOverview({
             }
           />
           <Table 
-            headers={['DONATION BATCH', 'QUANTITY', 'DISPATCH STATUS', 'SCHEDULED WINDOW', 'ACTION']} 
+            headers={['DONATION', 'QUANTITY', 'STATUS', 'PICKUP', '']} 
             rows={activeDonations.length > 0 ? activeDonations.map(d => [
               <div key={d.id}>
                 <b>{d.code}</b>
-                <small>{d.title} · {d.food_category}</small>
+                <small>{d.title}</small>
               </div>,
               d.quantity,
               <Badge key={`b-${d.id}`} tone={d.tone || 'blue'}>{d.status}</Badge>,
               d.pickup_window,
-              <Button key={`btn-${d.id}`} sm primary onClick={() => { setDonationId(d.id); setScreen('donation-details'); }}>
-                View Details
-              </Button>
-            ]) : []}
+              <a key={`lnk-${d.id}`} style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)' }} onClick={() => { setDonationId(d.id); setScreen('donation-details'); }}>
+                View
+              </a>
+            ]) : [
+              [
+                <div key="r1"><b>RL-00128</b><small>Vegetarian lunch boxes</small></div>,
+                '80 meals',
+                <Badge key="b1" tone="blue">Pickup assigned</Badge>,
+                'Today 3:30 PM',
+                <a key="l1" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)' }} onClick={() => setScreen('donation-details')}>View</a>
+              ],
+              [
+                <div key="r2"><b>RL-00124</b><small>Packed rice meals</small></div>,
+                '150 meals',
+                <Badge key="b2" tone="amber">In transit</Badge>,
+                'Today 2:45 PM',
+                <a key="l2" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)' }} onClick={() => setScreen('donation-details')}>View</a>
+              ],
+              [
+                <div key="r3"><b>RL-00119</b><small>Bakery assortment</small></div>,
+                '42 packs',
+                <Badge key="b3" tone="green">Delivered</Badge>,
+                'Yesterday',
+                <a key="l3" style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--accent)' }} onClick={() => setScreen('donation-details')}>View</a>
+              ]
+            ]}
           />
+          <div style={{ marginTop: 12, textAlign: 'right' }}>
+            <a style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--accent)' }} onClick={() => setScreen('history')}>View all donations →</a>
+          </div>
         </Card>
 
         <Card>
           <SectionTitle 
-            title="Today's Pickup Schedule" 
-            action={<Badge tone="blue">{pickups.length} scheduled pickups</Badge>}
+            title="Upcoming pickups" 
+            action={<Badge tone="blue">2 scheduled</Badge>}
           />
           <Timeline 
-            items={pickups}
+            items={pickups.length > 0 ? pickups : [
+              { title: 'RL-00128 · 80 lunch boxes', time: 'Today 3:30 PM', active: true },
+              { title: 'RL-00131 · 35 bakery packs', time: 'Today 5:00 PM' }
+            ]}
           />
-          <div className="notice">
-            <ShieldCheck size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: 'text-bottom' }} />
-            Please keep items stored at or below 4°C (chilled) until the courier verifies temperature and signs the digital manifest.
+          <div className="notice" style={{ marginTop: 10 }}>
+            Keep items stored correctly until the volunteer confirms pickup.
           </div>
         </Card>
       </div>
@@ -938,26 +1187,30 @@ function DonorOverview({
       <div className="split lower">
         <Card>
           <SectionTitle 
-            title="Live Operational Feed" 
-            action={<Badge tone="gray">Realtime</Badge>}
+            title="Recent activity" 
+            action={<Badge tone="gray">Live</Badge>}
           />
           <Timeline 
-            items={activity}
+            items={activity.length > 0 ? activity : [
+              { title: 'Donation RL-00128 submitted', time: '2:14 PM', active: true },
+              { title: 'Recipient allocation completed', time: '2:16 PM' },
+              { title: 'Volunteer accepted pickup', time: '2:21 PM' }
+            ]}
           />
         </Card>
 
         <Card>
-          <SectionTitle title="Quick Management Actions" />
+          <SectionTitle title="Quick actions" />
           <div className="quick-grid">
             <button className="quick-action-btn" onClick={() => setScreen('create-donation')}>
               <Plus size={20} />
-              <span>Create Food Donation</span>
-              <small>List surplus meals from lunch or dinner services</small>
+              <span>Create a donation</span>
+              <small>List surplus meals from your kitchen</small>
             </button>
             <button className="quick-action-btn" onClick={() => setScreen('history')}>
               <ClipboardList size={20} />
-              <span>Donation History & Receipts</span>
-              <small>Export certified food donation tax deduction reports</small>
+              <span>View donation history</span>
+              <small>Export receipts and reports</small>
             </button>
           </div>
         </Card>
@@ -1250,8 +1503,24 @@ function DonationDetails({
         backLabel="Back to Donor Overview"
         action={
           <div className="actions">
+            <Button 
+              onClick={async () => {
+                if (donation?.id) {
+                  notify('Generating official PDF rescue receipt...');
+                  try {
+                    await donorApi.downloadReceipt(donation.id);
+                    notify('Official receipt downloaded successfully.');
+                  } catch (err: any) {
+                    notify(err.message || 'Failed to download receipt PDF');
+                  }
+                }
+              }} 
+              disabled={!donation}
+            >
+              <Download size={14} /> Download Receipt (PDF)
+            </Button>
             <Button onClick={() => window.print()} disabled={!donation}>
-              <Download size={14} /> Print Receipt
+              Print View
             </Button>
             <Button primary onClick={() => setScreen('history')}>View Donation History</Button>
           </div>
@@ -1576,34 +1845,34 @@ function NgoOverview({
         subtitle="Hope Community Foundation · Kitchen & Shelter Hub. Receiving intake is active until 6:00 PM." 
         action={
           <Button primary onClick={() => setScreen('requirements')}>
-            <ClipboardCheck size={16} /> Update Daily Receiving Capacity
+            Update requirements
           </Button>
         }
       />
 
       <div className="stats-grid">
         <Stat 
-          label="Incoming Offers Pending" 
+          label="INCOMING OFFERS" 
           value={stats ? `${stats.incoming_offers}` : "6"} 
-          note="2 urgent: pickup within 90 mins" 
+          note="2 need a response" 
           icon={<Package size={18} />} 
         />
         <Stat 
-          label="Meals Accepted This Week" 
+          label="MEALS ACCEPTED" 
           value={stats ? `${stats.meals_accepted_week}` : "420"} 
-          note="Saved ~180 kg CO2 equivalent" 
+          note="For this week" 
           icon={<CheckCircle2 size={18} />} 
         />
         <Stat 
-          label="Received Today" 
+          label="RECEIVED TODAY" 
           value={stats ? `${stats.received_today}` : "110"} 
-          note="Across 3 verified handovers" 
+          note="Across 3 deliveries" 
           icon={<Truck size={18} />} 
         />
         <Stat 
-          label="Remaining Daily Capacity" 
+          label="AVAILABLE CAPACITY" 
           value={stats ? `${stats.available_capacity}` : "70"} 
-          note={stats ? `${stats.daily_capacity - stats.available_capacity} / ${stats.daily_capacity} total capacity filled` : "110 / 180 total capacity filled"} 
+          note={stats ? `Of ${stats.daily_capacity} meals remaining` : "Of 180 meals remaining"} 
           icon={<Users size={18} />} 
         />
       </div>
@@ -1710,7 +1979,7 @@ function NgoOverview({
       <div className="split lower">
         <Card>
           <SectionTitle 
-            title="Upcoming Courier Arrivals" 
+            title="Upcoming deliveries" 
             action={<small style={{ color: '#10b981', fontWeight: 700 }}>2 In Flight</small>}
           />
           <Timeline 
@@ -1722,20 +1991,24 @@ function NgoOverview({
         </Card>
 
         <Card>
-          <SectionTitle title="Receiving Checklist & Safety Log" />
-          <div className="notice" style={{ marginTop: 0 }}>
-            Before signing the digital manifest, verify that sealed lids are intact and temperature probe registers under 5°C for cooked foods.
-          </div>
+          <SectionTitle title="Recent receiving activity" />
+          <Timeline
+            items={[
+              { title: 'Delivery from ABC Restaurant received', time: '1:45 PM · 60 meals · Jordan Mathew', active: true },
+              { title: 'Allocation accepted for RL-00128', time: '2:16 PM · 80 meals offered' },
+              { title: 'Capacity updated by Sarah Kumar', time: '1:58 PM' }
+            ]}
+          />
           <div className="quick-grid" style={{ marginTop: 14 }}>
             <button className="quick-action-btn" onClick={() => setScreen('offers')}>
               <Package size={18} />
-              <span>Browse Offers Queue</span>
+              <span>Browse offers queue</span>
               <small>Respond to donors nearby</small>
             </button>
             <button className="quick-action-btn" onClick={() => setScreen('requirements')}>
               <Users size={18} />
-              <span>Manage Beneficiary Counts</span>
-              <small>Update family headcount</small>
+              <span>Update requirements</span>
+              <small>Manage capacity and preferences</small>
             </button>
           </div>
         </Card>
@@ -2276,7 +2549,7 @@ function VolunteerOverview({
     <>
       <PageHead 
         eyebrow="VOLUNTEER RESCUE COURIER / OVERVIEW" 
-        title="Volunteer workspace" 
+        title="Your volunteer workspace" 
         subtitle={stats?.vehicle_type || 'Manage your assigned rescue missions and availability.'} 
         action={
           <div className="actions">
@@ -2424,6 +2697,35 @@ function Task({
   const [receiverName, setReceiverName] = useState('');
   const [tempChecked, setTempChecked] = useState('');
   const [tempAtDrop, setTempAtDrop] = useState('');
+  const [isGpsActive, setIsGpsActive] = useState(false);
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [photoEvidence, setPhotoEvidence] = useState<string | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  useEffect(() => {
+    let watchId: number | null = null;
+    if (isGpsActive && typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+      watchId = navigator.geolocation.watchPosition(
+        async (position) => {
+          const { latitude, longitude, accuracy, speed } = position.coords;
+          setGpsCoords({ lat: latitude, lng: longitude });
+          await volunteerApi.updateLocation({
+            latitude,
+            longitude,
+            accuracy: accuracy || undefined,
+            speed: speed || undefined
+          });
+        },
+        (error) => {
+          console.warn('Geolocation telemetry watch notice:', error.message);
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      );
+    }
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isGpsActive]);
 
   useEffect(() => {
     const loadTask = async () => {
@@ -2652,6 +2954,69 @@ function Task({
             </Button>
           </Card>
 
+          <Card style={{ marginBottom: 20 }}>
+            <SectionTitle 
+              title="Courier Live GPS Telemetry" 
+              action={
+                <Badge tone={isGpsActive ? 'green' : 'gray'}>
+                  {isGpsActive ? '🛰️ Live Telemetry Active' : 'Telemetry Standby'}
+                </Badge>
+              }
+            />
+            <div className="between">
+              <span>Automatic Location Broadcast:</span>
+              <Button 
+                sm 
+                primary={!isGpsActive}
+                onClick={() => {
+                  const nextState = !isGpsActive;
+                  setIsGpsActive(nextState);
+                  notify(nextState ? 'GPS telemetry broadcasting enabled' : 'GPS telemetry paused');
+                }}
+              >
+                {isGpsActive ? 'Pause GPS' : '📡 Broadcast GPS'}
+              </Button>
+            </div>
+            {gpsCoords ? (
+              <div style={{ marginTop: 10, fontSize: 12, color: '#10b981' }}>
+                Active Fix: {gpsCoords.lat.toFixed(5)}° N, {gpsCoords.lng.toFixed(5)}° E
+              </div>
+            ) : (
+              <p style={{ marginTop: 8, fontSize: 12, color: '#9ca3af' }}>Enable broadcast to transmit high-precision live route telemetry to Operations Command Central.</p>
+            )}
+          </Card>
+
+          <Card style={{ marginBottom: 20 }}>
+            <SectionTitle title="Verification & Photo Evidence" />
+            <p style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10 }}>Capture camera inspection or handover verification photo evidence:</p>
+            <input 
+              type="file" 
+              accept="image/*"
+              disabled={uploadingPhoto}
+              style={{ fontSize: 12, width: '100%', marginBottom: 8 }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setUploadingPhoto(true);
+                notify('Uploading photo evidence...');
+                const res = await uploadsApi.uploadPhoto(file);
+                setUploadingPhoto(false);
+                if (res.data?.url) {
+                  setPhotoEvidence(res.data.url);
+                  notify('Photo evidence uploaded and stored.');
+                } else {
+                  notify(res.error || 'Photo upload failed');
+                }
+              }}
+            />
+            {uploadingPhoto && <p style={{ fontSize: 12, color: '#f59e0b' }}>Uploading image...</p>}
+            {photoEvidence && (
+              <div style={{ marginTop: 8, fontSize: 12, color: '#10b981' }}>
+                ✓ Evidence linked: <a href={photoEvidence} target="_blank" rel="noreferrer" style={{ color: '#10b981', textDecoration: 'underline' }}>View Evidence File</a>
+              </div>
+            )}
+          </Card>
+
           <Card>
             <SectionTitle title="Food Handling Requirements" />
             <div className="between">
@@ -2701,14 +3066,19 @@ function OpsOverview({
       if (res.data) setMissionsList(res.data);
       else if (res.error) notify(res.error);
     });
-    opsApi.getTelemetryNodes().then(res => {
-      if (res.data) setTelemetry(res.data);
-      else if (res.error) notify(res.error);
-    });
+    const loadTelemetry = () => {
+      opsApi.getTelemetryNodes().then(res => {
+        if (res.data) setTelemetry(res.data);
+        else if (res.error) notify(res.error);
+      });
+    };
+    loadTelemetry();
+    const telemetryTimer = window.setInterval(loadTelemetry, 15000);
     opsApi.getExceptions().then(res => {
       if (res.data) setExceptions(res.data);
       else if (res.error) notify(res.error);
     });
+    return () => window.clearInterval(telemetryTimer);
   }, [notify]);
 
   return (
@@ -2792,46 +3162,7 @@ function OpsOverview({
           />
           
           <div className="map-widget">
-            <svg className="map-svg" viewBox="0 0 400 240">
-              <defs>
-                <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-                  <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
-                </pattern>
-              </defs>
-              <rect width="100%" height="100%" fill="#0d1712" />
-              <rect width="100%" height="100%" fill="url(#grid)" />
-              
-              {/* Street roads */}
-              <path d="M 40 40 L 360 80 L 340 200 L 80 180 Z" fill="none" stroke="#1d2e24" strokeWidth="6" />
-              <path d="M 120 40 L 140 210" fill="none" stroke="#1d2e24" strokeWidth="4" />
-              <path d="M 40 120 L 370 140" fill="none" stroke="#1d2e24" strokeWidth="4" />
-
-              {/* Mission route line animated */}
-              <path 
-                d="M 100 90 L 190 115 L 290 130" 
-                fill="none" 
-                stroke="#10b981" 
-                strokeWidth="2.5" 
-                strokeDasharray="6,4" 
-              />
-
-              {/* Donor node */}
-              <circle cx="100" cy="90" r="10" fill="rgba(16, 185, 129, 0.2)" />
-              <circle cx="100" cy="90" r="5" fill="#10b981" />
-              <text x="80" y="75" fill="#a7f3d0" fontSize="10" fontWeight="bold">ABC Restaurant</text>
-
-              {/* Volunteer Courier node in motion */}
-              <circle cx="190" cy="115" r="14" fill="rgba(245, 158, 11, 0.25)">
-                <animate attributeName="r" values="10;18;10" dur="2s" repeatCount="indefinite" />
-              </circle>
-              <circle cx="190" cy="115" r="6" fill="#f59e0b" />
-              <text x="175" y="142" fill="#fde68a" fontSize="10" fontWeight="bold">Jordan M. (Courier)</text>
-
-              {/* Recipient NGO node */}
-              <circle cx="290" cy="130" r="10" fill="rgba(59, 130, 246, 0.2)" />
-              <circle cx="290" cy="130" r="5" fill="#3b82f6" />
-              <text x="270" y="115" fill="#bfdbfe" fontSize="10" fontWeight="bold">Hope Shelter</text>
-            </svg>
+            <LiveOpsMap nodes={telemetry as MapNode[]} />
 
             <div className="map-legend">
               <span><span className="dot-indicator donor" /> Donor Kitchen</span>
@@ -2853,13 +3184,52 @@ function OpsOverview({
             title="Operational Exceptions & Dispatch Alerts" 
             action={<Badge tone={exceptions.filter(e => e.status === 'OPEN').length ? 'amber' : 'green'}>{exceptions.filter(e => e.status === 'OPEN').length} require attention</Badge>}
           />
-          <Timeline 
-            items={exceptions.slice(0, 8).map((item) => ({
-              title: `${item.type}: ${item.description}`,
-              time: `${item.severity} · ${item.status}`,
-              active: item.status === 'OPEN'
-            }))}
-          />
+          {exceptions.length === 0 ? (
+            <p style={{ fontSize: 13, color: '#9ca3af', padding: '12px 0' }}>No active dispatch exceptions. Operations running nominally.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {exceptions.slice(0, 6).map((item) => (
+                <div 
+                  key={item.id} 
+                  style={{ 
+                    padding: 10, 
+                    background: item.status === 'OPEN' ? '#261b17' : '#111f17', 
+                    borderRadius: 6, 
+                    borderLeft: item.status === 'OPEN' ? '4px solid #ef4444' : '4px solid #10b981',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#f9fafb' }}>
+                      {item.type}: {item.description}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                      Severity: <b style={{ color: item.severity === 'CRITICAL' ? '#ef4444' : '#f59e0b' }}>{item.severity}</b> · Status: {item.status}
+                    </div>
+                  </div>
+                  {item.status === 'OPEN' && (
+                    <Button 
+                      sm 
+                      onClick={async () => {
+                        notify('Resolving operational exception...');
+                        const res = await opsApi.resolveException(item.id, 'RESOLVED', 'Dispatcher verified and resolved operational condition.');
+                        if (res.data) {
+                          notify('Exception resolved successfully.');
+                          opsApi.getExceptions().then(r => r.data && setExceptions(r.data));
+                        } else {
+                          notify(res.error || 'Failed to resolve exception');
+                        }
+                      }}
+                    >
+                      Resolve
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
 
         <Card>
@@ -3145,6 +3515,199 @@ function MissionDetail({
   ); 
 }
 
+// ---------------- SCREEN 17: NETWORK MANAGEMENT ----------------
+function NetworkManagement({
+  setScreen,
+  notify
+}: {
+  setScreen: (s: Screen) => void;
+  notify: (msg: string) => void;
+}) {
+  const [activeTab, setActiveTab] = useState<'ngos' | 'volunteers' | 'donors'>('ngos');
+  const [networkData, setNetworkData] = useState<{ ngos: any[]; volunteers: any[]; donors: any[] }>({
+    ngos: [],
+    volunteers: [],
+    donors: []
+  });
+  const [search, setSearch] = useState('');
+
+  const loadNetwork = React.useCallback(async () => {
+    const res = await opsApi.getNetwork();
+    if (res.data) {
+      setNetworkData(res.data);
+    } else if (res.error) {
+      notify(res.error);
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    loadNetwork();
+  }, [loadNetwork]);
+
+  return (
+    <>
+      <PageHead 
+        eyebrow="OPERATIONS / NETWORK DIRECTORY" 
+        title="Rescue Logistics & Partner Network" 
+        subtitle="Live registry of partner donor facilities, shelter distribution capacities, and verified volunteer couriers."
+        action={
+          <div className="actions">
+            <Button onClick={loadNetwork}>
+              <RefreshCw size={14} /> Refresh Network
+            </Button>
+            <Button primary onClick={() => setScreen('ops-overview')}>
+              Back to Operations Console
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="stats-grid">
+        <Stat 
+          label="Registered Recipient NGOs" 
+          value={`${networkData.ngos.length}`} 
+          note={`${networkData.ngos.filter(n => n.is_verified).length} verified organizations`} 
+          icon={<Heart size={18} />} 
+        />
+        <Stat 
+          label="Active Volunteer Couriers" 
+          value={`${networkData.volunteers.length}`} 
+          note={`${networkData.volunteers.filter(v => v.is_available).length} currently on route/available`} 
+          icon={<Users size={18} />} 
+        />
+        <Stat 
+          label="Partner Food Donors" 
+          value={`${networkData.donors.length}`} 
+          note="Commercial food kitchens" 
+          icon={<Package size={18} />} 
+        />
+        <Stat 
+          label="Network Daily Meal Capacity" 
+          value={`${networkData.ngos.reduce((acc, curr) => acc + (curr.capacity_meals || 0), 0)}`} 
+          note="Combined shelter storage" 
+          icon={<CheckCircle2 size={18} />} 
+        />
+      </div>
+
+      <Card>
+        <div className="toolbar">
+          <div className="tabs">
+            <button className={activeTab === 'ngos' ? 'active' : ''} onClick={() => setActiveTab('ngos')}>
+              Recipient NGOs ({networkData.ngos.length})
+            </button>
+            <button className={activeTab === 'volunteers' ? 'active' : ''} onClick={() => setActiveTab('volunteers')}>
+              Volunteer Couriers ({networkData.volunteers.length})
+            </button>
+            <button className={activeTab === 'donors' ? 'active' : ''} onClick={() => setActiveTab('donors')}>
+              Donor Kitchens ({networkData.donors.length})
+            </button>
+          </div>
+          <div className="actions">
+            <div className="search">
+              <Search size={14} />
+              <input 
+                placeholder="Search organization, courier, phone..." 
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        {activeTab === 'ngos' && (
+          <Table 
+            headers={['ORGANIZATION & CONTACT', 'MEAL CAPACITY', 'STATUS', 'VERIFICATION', 'ACTIVE OFFERS', 'ACTIONS']}
+            rows={networkData.ngos
+              .filter(n => (n.name || '').toLowerCase().includes(search.toLowerCase()) || (n.address || '').toLowerCase().includes(search.toLowerCase()))
+              .map((ngo) => [
+                <div key={ngo.id}>
+                  <b>{ngo.name}</b>
+                  <small>{ngo.contact_name || 'Contact'} · {ngo.phone || ngo.email}</small>
+                </div>,
+                `${ngo.capacity_meals || 0} meals / day`,
+                <Badge key={`status-${ngo.id}`} tone={ngo.is_active ? 'green' : 'gray'}>{ngo.is_active ? 'Active' : 'Inactive'}</Badge>,
+                <Badge key={`verif-${ngo.id}`} tone={ngo.is_verified ? 'blue' : 'amber'}>{ngo.is_verified ? 'Verified Partner' : 'Pending Verification'}</Badge>,
+                `${ngo.active_offers_count || 0} active`,
+                <Button 
+                  key={`btn-${ngo.id}`}
+                  sm 
+                  onClick={async () => {
+                    const res = await opsApi.updateNgoNetwork(ngo.id, { is_verified: !ngo.is_verified });
+                    if (res.data) {
+                      notify(`Updated ${ngo.name} verification status.`);
+                      loadNetwork();
+                    } else {
+                      notify(res.error || 'Update failed');
+                    }
+                  }}
+                >
+                  {ngo.is_verified ? 'Unverify' : 'Verify'}
+                </Button>
+              ])
+            }
+          />
+        )}
+
+        {activeTab === 'volunteers' && (
+          <Table 
+            headers={['COURIER & VEHICLE', 'AVAILABILITY', 'RATING', 'COMPLETED RESCUES', 'TELEMETRY STATUS', 'ACTIONS']}
+            rows={networkData.volunteers
+              .filter(v => (v.name || '').toLowerCase().includes(search.toLowerCase()) || (v.vehicle_type || '').toLowerCase().includes(search.toLowerCase()))
+              .map((vol) => [
+                <div key={vol.id}>
+                  <b>{vol.name}</b>
+                  <small>{vol.vehicle_type || 'Bicycle / Foot'} · {vol.phone}</small>
+                </div>,
+                <Badge key={`status-${vol.id}`} tone={vol.is_available ? 'green' : 'gray'}>{vol.is_available ? 'Available' : 'Offline'}</Badge>,
+                `★ ${vol.rating || 5.0}`,
+                `${vol.total_rescues || 0} missions`,
+                vol.current_lat && vol.current_lon ? (
+                  <span key={`fix-${vol.id}`} style={{ fontSize: 11, color: '#10b981' }}>Fix: {Number(vol.current_lat).toFixed(4)}°, {Number(vol.current_lon).toFixed(4)}°</span>
+                ) : (
+                  <span key={`nofix-${vol.id}`} style={{ fontSize: 11, color: '#9ca3af' }}>No live GPS signal</span>
+                ),
+                <Button 
+                  key={`btn-${vol.id}`}
+                  sm 
+                  onClick={async () => {
+                    const res = await opsApi.updateVolunteerNetwork(vol.id, { is_verified: !vol.is_verified });
+                    if (res.data) {
+                      notify(`Updated courier ${vol.name} verification.`);
+                      loadNetwork();
+                    } else {
+                      notify(res.error || 'Update failed');
+                    }
+                  }}
+                >
+                  {vol.is_verified ? 'Revoke Badge' : 'Verify Courier'}
+                </Button>
+              ])
+            }
+          />
+        )}
+
+        {activeTab === 'donors' && (
+          <Table 
+            headers={['DONOR ESTABLISHMENT', 'TYPE', 'CONTACT', 'ADDRESS', 'ACTIVE DONATIONS']}
+            rows={networkData.donors
+              .filter(d => (d.name || '').toLowerCase().includes(search.toLowerCase()) || (d.address || '').toLowerCase().includes(search.toLowerCase()))
+              .map((d) => [
+                <div key={d.id}>
+                  <b>{d.name}</b>
+                </div>,
+                <Badge key={`badge-${d.id}`} tone="blue">{d.type || 'Restaurant'}</Badge>,
+                `${d.contact_name || 'Kitchen Staff'} (${d.phone || '—'})`,
+                d.address || '—',
+                `${d.active_donations_count || 0} batches active`
+              ])
+            }
+          />
+        )}
+      </Card>
+    </>
+  );
+}
+
 // ---------------- MASTER APPLICATION COMPONENT ----------------
 export default function RescueLoopApp() {
   const [screen, setScreen] = useState<Screen>('login');
@@ -3207,6 +3770,8 @@ export default function RescueLoopApp() {
         return <Missions setScreen={setScreen} notify={notify} setMissionId={setMissionId} />;
       case 'mission-detail':
         return <MissionDetail setScreen={setScreen} notify={notify} missionId={missionId} />;
+      case 'network':
+        return <NetworkManagement setScreen={setScreen} notify={notify} />;
       default:
         return <DonorOverview setScreen={setScreen} notify={notify} setDonationId={setDonationId} />;
     }

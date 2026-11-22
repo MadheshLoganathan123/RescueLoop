@@ -1096,13 +1096,22 @@ td small {
 
 /* Interactive Network Map Widget */
 .map-widget {
-  height: 240px;
+  height: 360px;
   border-radius: 10px;
   background: #111a15;
   position: relative;
   overflow: hidden;
   box-shadow: inset 0 0 30px rgba(0,0,0,0.5);
   border: 1px solid #23352b;
+}
+
+.map-fallback {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a4b8af;
+  font-size: 13px;
 }
 
 .map-svg {
@@ -1113,8 +1122,17 @@ td small {
   height: 100%;
 }
 
+.map-widget .leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #0d1712;
+  font-family: inherit;
+  z-index: 0;
+}
+
 .map-legend {
   position: absolute;
+  z-index: 500;
   bottom: 12px;
   left: 12px;
   background: rgba(15, 26, 21, 0.85);

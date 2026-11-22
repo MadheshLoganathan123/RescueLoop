@@ -189,17 +189,17 @@ The 14 database models in `backend/app/models/entities.py`:
 8. **Frontend UI (18 Screens)**: Preserved and connected across all 4 roles.
 9. **OpenRouter Image Generator**: Working utility script `scripts/generate_image.py`.
 
-### Remaining Major Implementation Areas:
-1. **External SMS/WhatsApp OTP Delivery**: Real SMS dispatch via Twilio / Gupshup / AWS SNS.
-2. **Live Courier GPS Tracking**: Browser Geolocation API stream + backend telemetry.
-3. **Interactive Map Component**: Replace static SVG with Leaflet / OpenStreetMap.
-4. **Operations Exception Resolution UI**: Expose the existing `/ops/exceptions/{id}/resolve` backend API in the frontend.
-5. **Operations Network Management UI**: CRUD screens for NGO and volunteer verification.
-6. **PDF Donation Receipts**: Generate binary PDF receipts using ReportLab / WeasyPrint.
-7. **File & Photo Uploads**: Food inspection and handover delivery photos.
-8. **Alembic Database Migrations**: Formal version-controlled migrations for PostgreSQL.
-9. **API Rate Limiting & Security Hardening**: Slowapi / Redis rate limiting.
-10. **Frontend Automated Testing & CI/CD**: Vitest / Playwright and GitHub Actions pipeline.
+### Remaining blueprint items, completed in this handover:
+1. **External SMS OTP Delivery**: Twilio when `SMS_PROVIDER=twilio`; console fallback otherwise. Handover OTP is sent at recipient arrival, expires after 15 minutes, and is not resent inside a 60-second window.
+2. **Live Courier GPS Tracking**: `POST /api/v1/volunteer/location` plus browser `watchPosition` on the volunteer task screen.
+3. **Interactive Map Component**: Operations overview uses Leaflet / OpenStreetMap markers from `/ops/telemetry/map`, refreshed every 15 seconds.
+4. **Operations Exception Resolution UI**: Open exceptions can be resolved from the operations console.
+5. **Operations Network Management UI**: Network directory lists NGOs, volunteers, and donors and can update verification and capacity.
+6. **PDF Donation Receipts**: `GET /api/v1/donor/donations/{id}/receipt` returns a ReportLab PDF.
+7. **File & Photo Uploads**: `POST /api/v1/uploads` stores inspection and handover photos; the volunteer task screen uploads them.
+8. **Alembic Database Migrations**: Async Alembic env plus a generated schema revision. Startup still calls `create_all` so existing local databases keep working.
+9. **API Rate Limiting & Security Hardening**: SlowAPI limits login, registration, OTP verification, and password reset outside the test environment. Production responses send HSTS plus standard security headers. Forgotten-password tokens are hashed, single-use, and emailed (SMTP or console).
+10. **Frontend Automated Testing & CI/CD**: `npm test` checks map coordinate filtering with Node’s built-in test runner. GitHub Actions runs pytest, that frontend test, TypeScript, and the Next.js build. Dockerfiles and Compose are in the repo root. `npm run test:vitest` is available where the Vitest native binary is allowed to load.
 
 ---
 

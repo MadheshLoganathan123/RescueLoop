@@ -77,6 +77,7 @@ class User(Base):
     volunteer_profile = relationship("VolunteerProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     audit_logs = relationship("AuditLog", back_populates="user")
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
+    password_reset_tokens = relationship("PasswordResetToken", back_populates="user", cascade="all, delete-orphan")
 
 
 class DonorProfile(Base):
@@ -213,6 +214,9 @@ class Mission(Base):
     estimated_pickup = Column(DateTime, nullable=True)
     estimated_drop = Column(DateTime, nullable=True)
     otp_code = Column(String(10), default=lambda: f"{secrets.randbelow(900000) + 100000}")
+    otp_expires_at = Column(DateTime, nullable=True)
+    otp_sent_at = Column(DateTime, nullable=True)
+    otp_failed_attempts = Column(Integer, default=0)
     is_cold_chain_safe = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -316,6 +320,19 @@ class Notification(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="notifications")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="password_reset_tokens")
 
 
 class AuditLog(Base):

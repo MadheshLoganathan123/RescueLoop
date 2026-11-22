@@ -12,6 +12,15 @@ from backend.app.routers.ngo import router as ngo_router
 from backend.app.routers.volunteer import router as volunteer_router
 from backend.app.routers.ops import router as ops_router
 from backend.app.routers.ai import router as ai_router
+from backend.app.routers.notifications import router as notifications_router
+from backend.app.routers.uploads import router as uploads_router
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+from backend.app.limiter import limiter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rescueloop.main")
@@ -50,14 +59,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if settings.ENVIRONMENT.lower() == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
 
 # Mount all API routers under /api/v1
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+upload_path = Path(settings.UPLOAD_DIR)
+upload_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")
+
 app.include_router(auth_router, prefix=settings.API_V1_STR)
 app.include_router(donor_router, prefix=settings.API_V1_STR)
 app.include_router(ngo_router, prefix=settings.API_V1_STR)
 app.include_router(volunteer_router, prefix=settings.API_V1_STR)
 app.include_router(ops_router, prefix=settings.API_V1_STR)
 app.include_router(ai_router, prefix=settings.API_V1_STR)
+app.include_router(notifications_router, prefix=settings.API_V1_STR)
+app.include_router(uploads_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 @app.get("/health")

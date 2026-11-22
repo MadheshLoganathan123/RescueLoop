@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     
     # Security
     JWT_SECRET: str = Field(
+        default="rescueloop_super_secure_jwt_secret_key_production_2026_0123456789",
         validation_alias=AliasChoices("JWT_SECRET", "SECRET_KEY"),
         min_length=32,
     )
@@ -80,6 +81,27 @@ class Settings(BaseSettings):
     AGENT_ROUTER_BASE_URL: str = "https://api.agentrouter.to/api/agentic-api"
     AGENT_ROUTER_MODEL: str = ""
     AGENT_ROUTER_TIMEOUT_SECONDS: float = 12.0
+    OPENROUTER_API_KEY: str = ""
+
+    # SMS / OTP Delivery
+    SMS_PROVIDER: str = "console"
+    SMS_API_KEY: str = ""
+    SMS_API_SECRET: str = ""
+    SMS_SENDER_ID: str = "RescueLoop"
+
+    # Storage & Uploads
+    UPLOAD_DIR: str = str(BASE_DIR / "uploads")
+
+    # Public app URL used in password-reset links
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+
+    # Email (SMTP). Empty host keeps a console fallback so local runs still work.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@rescueloop.local"
+    SMTP_USE_TLS: bool = True
 
     class Config:
         env_file = [str(root_env), str(backend_env), ".env"]

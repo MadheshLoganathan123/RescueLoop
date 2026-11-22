@@ -272,7 +272,27 @@ async def test_ngo_decline_restores_capacity(client: AsyncClient, ngo_token: str
     offers_resp = await client.get("/api/v1/ngo/offers", headers=headers)
     offers = offers_resp.json()
     assert len(offers) > 0
-    offer_id = offers[0]["id"]
+    offer = next((o for o in offers if o.get("status") in ("New offer", "Awaiting response")), None)
+    if not offer:
+        donor_auth = await client.post("/api/v1/auth/demo-login/donor")
+        d_token = donor_auth.json()["access_token"]
+        await client.post(
+            "/api/v1/donor/donations",
+            json={
+                "title": "Fresh Surplus for Decline Test",
+                "food_category": "Prepared Cooked Meals",
+                "quantity_meals": 30,
+                "packaging_type": "Boxes",
+                "storage_temp": "Refrigerated (4°C)",
+                "pickup_address": "Test Donor Kitchen, Chennai",
+                "contact_phone": "+91 98765 00000"
+            },
+            headers={"Authorization": f"Bearer {d_token}"}
+        )
+        offers_resp = await client.get("/api/v1/ngo/offers", headers=headers)
+        offers = offers_resp.json()
+        offer = next((o for o in offers if o.get("status") in ("New offer", "Awaiting response")), offers[0])
+    offer_id = offer["id"]
 
     # Decline offer
     decline_resp = await client.post(

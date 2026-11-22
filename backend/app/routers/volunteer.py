@@ -1,10 +1,13 @@
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import func
-from datetime import datetime
+from datetime import datetime, timedelta
+
+logger = logging.getLogger("rescueloop.volunteer")
 
 from backend.app.database import get_db
 from backend.app.models.entities import (
@@ -17,8 +20,13 @@ from backend.app.models.schemas import (
 )
 from backend.app.auth.dependencies import get_current_user, require_role
 from backend.app.services.audit_service import log_audit_event
+from backend.app.limiter import OTP_VERIFY_LIMIT, limiter
 
 router = APIRouter(prefix="/volunteer", tags=["Volunteer Workspace"])
+
+OTP_TTL = timedelta(minutes=15)
+OTP_RESEND_COOLDOWN = timedelta(seconds=60)
+MAX_OTP_FAILURES = 5
 
 @router.get("/dashboard-stats")
 async def get_volunteer_dashboard_stats(
@@ -255,6 +263,55 @@ async def update_task_step(
             raise HTTPException(status_code=409, detail="Mission is not in transit to a recipient")
         mission.status = MissionStatusEnum.HANDOVER_PENDING.value
         event_desc = "Volunteer arrived at recipient location and is ready for OTP handover."
+
+        # Dispatch the handover OTP once the courier reaches the recipient.
+        # A short cooldown stops repeated step updates from texting the same code.
+        try:
+            from backend.app.services.sms_service import send_handover_otp
+            from backend.app.services.notification_service import create_notification
+
+            now = datetime.utcnow()
+            recently_sent = (
+                mission.otp_sent_at is not None
+                and now - mission.otp_sent_at < OTP_RESEND_COOLDOWN
+            )
+            otp_to_send = mission.otp_code
+            if not recently_sent:
+                mission.otp_expires_at = now + OTP_TTL
+                mission.otp_sent_at = now
+                mission.otp_failed_attempts = 0
+
+            alloc_res = await db.execute(
+                select(DonationAllocation)
+                .options(selectinload(DonationAllocation.ngo))
+                .where(DonationAllocation.donation_id == mission.donation_id)
+                .order_by(DonationAllocation.created_at)
+            )
+            alloc = alloc_res.scalars().first()
+            ngo_phone = None
+            if alloc and alloc.ngo:
+                ngo_phone = alloc.ngo.contact_phone
+                if alloc.ngo.user_id and not recently_sent:
+                    await create_notification(
+                        db,
+                        user_id=alloc.ngo.user_id,
+                        title=f"Courier Arrived: Mission {mission.code}",
+                        message=(
+                            f"Courier has arrived with {mission.total_meals} meals. "
+                            f"Your handover OTP is {otp_to_send}. It expires in 15 minutes."
+                        ),
+                        type="ACTION_REQUIRED",
+                    )
+
+            if ngo_phone and not recently_sent:
+                await send_handover_otp(
+                    to_phone=ngo_phone,
+                    otp_code=otp_to_send,
+                    mission_code=mission.code,
+                    meals=mission.total_meals,
+                )
+        except Exception as sms_err:
+            logger.warning(f"Could not dispatch SMS OTP: {sms_err}")
     else:
         raise HTTPException(status_code=400, detail="Unsupported mission step")
 
@@ -280,9 +337,11 @@ async def update_task_step(
     return {"mission_id": mission.id, "status": mission.status, "step": req.step, "message": event_desc}
 
 @router.post("/tasks/{task_id}/verify-otp")
+@limiter.limit(OTP_VERIFY_LIMIT)
 async def verify_handover_otp(
     task_id: str,
     req: HandoverVerifyRequest,
+    request: Request,
     current_user: User = Depends(require_role(["volunteer"])),
     db: AsyncSession = Depends(get_db)
 ):
@@ -304,8 +363,15 @@ async def verify_handover_otp(
         MissionStatusEnum.HANDOVER_PENDING.value,
     ):
         raise HTTPException(status_code=409, detail="Mission is not ready for handover")
+    if (mission.otp_failed_attempts or 0) >= MAX_OTP_FAILURES:
+        raise HTTPException(status_code=429, detail="Too many incorrect OTP attempts. Ask the recipient for a fresh code.")
+    if mission.otp_expires_at and datetime.utcnow() > mission.otp_expires_at:
+        raise HTTPException(status_code=400, detail="Handover OTP has expired. Arrive at the stop again to request a new code.")
     if req.otp_code != mission.otp_code:
+        mission.otp_failed_attempts = (mission.otp_failed_attempts or 0) + 1
+        await db.commit()
         raise HTTPException(status_code=400, detail="Invalid handover OTP code")
+    mission.otp_failed_attempts = 0
 
     alloc_res = await db.execute(
         select(DonationAllocation)
@@ -354,10 +420,21 @@ async def verify_handover_otp(
         for assignment in assignment_result.scalars().all():
             assignment.status = AssignmentStatusEnum.COMPLETED.value
             assignment.completed_at = datetime.utcnow()
-        donation_result = await db.execute(select(Donation).where(Donation.id == mission.donation_id))
+        donation_result = await db.execute(
+            select(Donation).options(selectinload(Donation.donor)).where(Donation.id == mission.donation_id)
+        )
         donation = donation_result.scalars().first()
         if donation:
             donation.status = "DELIVERED"
+            if donation.donor and donation.donor.user_id:
+                from backend.app.services.notification_service import create_notification
+                await create_notification(
+                    db,
+                    user_id=donation.donor.user_id,
+                    title=f"Donation {donation.code} delivered",
+                    message=f"Mission {mission.code} is complete. Your receipt is ready to download.",
+                    type="SUCCESS",
+                )
 
     evt = MissionEvent(
         mission_id=mission.id,
@@ -425,3 +502,38 @@ async def get_volunteer_history(
         }
         for mission in result.scalars().all()
     ]
+
+from pydantic import BaseModel
+
+class VolunteerLocationPayload(BaseModel):
+    mission_id: Optional[str] = None
+    latitude: float
+    longitude: float
+    accuracy: Optional[float] = None
+    speed: Optional[float] = None
+    battery_level: Optional[int] = None
+
+@router.post("/location")
+async def update_volunteer_location(
+    req: VolunteerLocationPayload,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    vol_prof = current_user.volunteer_profile
+    if not vol_prof:
+        res = await db.execute(select(VolunteerProfile).limit(1))
+        vol_prof = res.scalars().first()
+
+    if vol_prof:
+        vol_prof.current_lat = req.latitude
+        vol_prof.current_lng = req.longitude
+        if req.battery_level is not None:
+            vol_prof.battery_level = req.battery_level
+        await db.commit()
+
+    return {
+        "success": True,
+        "latitude": req.latitude,
+        "longitude": req.longitude,
+        "updated_at": datetime.utcnow().isoformat()
+    }

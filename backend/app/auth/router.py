@@ -1,19 +1,43 @@
+import hashlib
+import secrets
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from typing import Optional, Dict, Any
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
 from backend.app.database import get_db
-from backend.app.models.entities import User, DonorProfile, NgoProfile, VolunteerProfile, RoleEnum
+from backend.app.models.entities import User, DonorProfile, NgoProfile, VolunteerProfile, PasswordResetToken, RoleEnum
 from backend.app.models.schemas import LoginRequest, Token, UserCreate, UserOut
 from backend.app.auth.security import verify_password, get_password_hash, create_access_token
 from backend.app.auth.dependencies import get_current_user
 from backend.app.config import settings
+from backend.app.limiter import LOGIN_LIMIT, PASSWORD_RESET_LIMIT, REGISTER_LIMIT, limiter
+from backend.app.services.email_service import send_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+RESET_TOKEN_MINUTES = 30
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20)
+    new_password: str = Field(min_length=8, max_length=72)
+
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 @router.post("/login", response_model=Token)
+@limiter.limit(LOGIN_LIMIT)
 async def login(request: Request, db: AsyncSession = Depends(get_db)):
     email_val = None
     password_val = None
@@ -114,7 +138,8 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
     )
 
 @router.post("/register", response_model=UserOut)
-async def register(req: UserCreate, db: AsyncSession = Depends(get_db)):
+@limiter.limit(REGISTER_LIMIT)
+async def register(request: Request, req: UserCreate, db: AsyncSession = Depends(get_db)):
     target_role = req.role.lower()
     if target_role not in {RoleEnum.DONOR.value, RoleEnum.NGO.value, RoleEnum.VOLUNTEER.value}:
         raise HTTPException(status_code=400, detail="Registration is limited to donor, NGO, and volunteer roles")
@@ -237,3 +262,77 @@ async def get_me(current_user: User = Depends(get_current_user)):
     user_out = UserOut.model_validate(current_user)
     user_out.organization_name = org_name
     return user_out
+
+
+@router.post("/forgot-password")
+@limiter.limit(PASSWORD_RESET_LIMIT)
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Always returns the same message so callers cannot discover which emails exist.
+    """
+    generic = {"message": "If an account exists for that email, a password reset link has been sent."}
+    result = await db.execute(select(User).where(User.email == str(body.email).lower().strip()))
+    user = result.scalars().first()
+    if not user or not user.is_active:
+        return generic
+
+    raw_token = secrets.token_urlsafe(32)
+    now = datetime.utcnow()
+    existing = await db.execute(
+        select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        )
+    )
+    for prior in existing.scalars().all():
+        prior.used_at = now
+
+    db.add(PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_reset_token(raw_token),
+        expires_at=now + timedelta(minutes=RESET_TOKEN_MINUTES),
+    ))
+    await db.commit()
+
+    reset_link = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/?reset_token={raw_token}"
+    await send_email(
+        to_email=user.email,
+        subject="Reset your RescueLoop password",
+        body=(
+            "A password reset was requested for your RescueLoop account.\n\n"
+            f"Open this link within {RESET_TOKEN_MINUTES} minutes:\n{reset_link}\n\n"
+            f"Or paste this token into the reset form:\n{raw_token}\n\n"
+            "If you did not request this, you can ignore this message."
+        ),
+    )
+    return generic
+
+
+@router.post("/reset-password")
+@limiter.limit(PASSWORD_RESET_LIMIT)
+async def reset_password(
+    request: Request,
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    token_hash = _hash_reset_token(body.token.strip())
+    result = await db.execute(
+        select(PasswordResetToken)
+        .options(selectinload(PasswordResetToken.user))
+        .where(PasswordResetToken.token_hash == token_hash)
+    )
+    record = result.scalars().first()
+    now = datetime.utcnow()
+    if not record or record.used_at is not None or record.expires_at < now:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired")
+    if not record.user or not record.user.is_active:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired")
+
+    record.user.hashed_password = get_password_hash(body.new_password)
+    record.used_at = now
+    await db.commit()
+    return {"message": "Password updated. You can sign in with the new password."}

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional, List
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -402,3 +403,150 @@ async def get_audit_trail(
             "timestamp": log.created_at.strftime("%Y-%m-%d %H:%M:%S")
         })
     return items
+
+class NgoNetworkUpdate(BaseModel):
+    is_verified: Optional[bool] = None
+    daily_capacity_meals: Optional[int] = None
+    current_free_capacity: Optional[int] = None
+    service_area_zones: Optional[str] = None
+
+class VolunteerNetworkUpdate(BaseModel):
+    is_available: Optional[bool] = None
+    max_meal_capacity: Optional[int] = None
+    certified_handler: Optional[bool] = None
+    vehicle_type: Optional[str] = None
+
+@router.get("/network")
+async def get_network_entities(
+    current_user: User = Depends(require_role(["ops"])),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Returns full network participants: NGOs, Volunteers, and Donors.
+    """
+    ngo_res = await db.execute(select(NgoProfile).options(selectinload(NgoProfile.user)))
+    ngos = ngo_res.scalars().all()
+
+    vol_res = await db.execute(select(VolunteerProfile).options(selectinload(VolunteerProfile.user)))
+    volunteers = vol_res.scalars().all()
+
+    donor_res = await db.execute(select(DonorProfile).options(selectinload(DonorProfile.user)))
+    donors = donor_res.scalars().all()
+
+    return {
+        "ngos": [
+            {
+                "id": n.id,
+                "user_id": n.user_id,
+                "name": n.organization_name,
+                "contact_person": n.contact_person,
+                "contact_phone": n.contact_phone,
+                "address": n.address,
+                "daily_capacity": n.daily_capacity_meals,
+                "free_capacity": n.current_free_capacity,
+                "is_verified": n.is_verified,
+                "service_areas": n.service_area_zones,
+                "has_refrigeration": n.has_refrigerated,
+                "status": "Verified & Active" if n.is_verified else "Pending Review"
+            }
+            for n in ngos
+        ],
+        "volunteers": [
+            {
+                "id": v.id,
+                "user_id": v.user_id,
+                "name": v.user.full_name if v.user else "Courier",
+                "phone": v.user.phone if v.user else "+91 98765 00000",
+                "vehicle_type": v.vehicle_type,
+                "plate": v.vehicle_plate,
+                "max_capacity": v.max_meal_capacity,
+                "is_available": v.is_available,
+                "rating": v.rating,
+                "completed_missions": v.completed_missions,
+                "meals_delivered": v.meals_delivered,
+                "certified_handler": v.certified_handler,
+                "battery_level": v.battery_level,
+                "current_lat": v.current_lat,
+                "current_lng": v.current_lng,
+                "status": "Online & Available" if v.is_available else "Offline"
+            }
+            for v in volunteers
+        ],
+        "donors": [
+            {
+                "id": d.id,
+                "user_id": d.user_id,
+                "name": d.organization_name,
+                "contact_person": d.contact_person,
+                "phone": d.contact_phone,
+                "address": d.address,
+                "kitchen_type": d.kitchen_type,
+                "fssai": d.fssai_license
+            }
+            for d in donors
+        ]
+    }
+
+@router.patch("/network/ngos/{ngo_id}")
+async def update_ngo_network(
+    ngo_id: str,
+    req: NgoNetworkUpdate,
+    current_user: User = Depends(require_role(["ops"])),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(NgoProfile).where(NgoProfile.id == ngo_id))
+    ngo = res.scalars().first()
+    if not ngo:
+        raise HTTPException(status_code=404, detail="NGO profile not found")
+
+    if req.is_verified is not None:
+        ngo.is_verified = req.is_verified
+    if req.daily_capacity_meals is not None:
+        ngo.daily_capacity_meals = req.daily_capacity_meals
+    if req.current_free_capacity is not None:
+        ngo.current_free_capacity = req.current_free_capacity
+    if req.service_area_zones is not None:
+        ngo.service_area_zones = req.service_area_zones
+
+    await log_audit_event(
+        db,
+        action="UPDATE_NGO_NETWORK",
+        entity_type="NgoProfile",
+        entity_id=ngo.id,
+        user_id=current_user.id,
+        details=req.model_dump(exclude_unset=True)
+    )
+    await db.commit()
+    return {"success": True, "id": ngo.id, "name": ngo.organization_name, "is_verified": ngo.is_verified}
+
+@router.patch("/network/volunteers/{volunteer_id}")
+async def update_volunteer_network(
+    volunteer_id: str,
+    req: VolunteerNetworkUpdate,
+    current_user: User = Depends(require_role(["ops"])),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(VolunteerProfile).where(VolunteerProfile.id == volunteer_id))
+    vol = res.scalars().first()
+    if not vol:
+        raise HTTPException(status_code=404, detail="Volunteer profile not found")
+
+    if req.is_available is not None:
+        vol.is_available = req.is_available
+    if req.max_meal_capacity is not None:
+        vol.max_meal_capacity = req.max_meal_capacity
+    if req.certified_handler is not None:
+        vol.certified_handler = req.certified_handler
+    if req.vehicle_type is not None:
+        vol.vehicle_type = req.vehicle_type
+
+    await log_audit_event(
+        db,
+        action="UPDATE_VOLUNTEER_NETWORK",
+        entity_type="VolunteerProfile",
+        entity_id=vol.id,
+        user_id=current_user.id,
+        details=req.model_dump(exclude_unset=True)
+    )
+    await db.commit()
+    return {"success": True, "id": vol.id, "is_available": vol.is_available}

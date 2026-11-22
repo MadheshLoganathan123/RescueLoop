@@ -299,7 +299,7 @@ async def init_seed_data(db: AsyncSession):
         donation_id=d2.id,
         ngo_id=ngo1_prof.id,
         allocated_meals=80,
-        accepted_meals=60,
+        accepted_meals=0,
         status=AllocationStatusEnum.AWAITING_RESPONSE.value,
         delivery_window="03:30 - 05:00 PM",
         notes="Awaiting shelter acceptance"

@@ -97,10 +97,17 @@ async def get_incoming_offers(
         raise HTTPException(status_code=404, detail="NGO profile not found")
     ngo_id = ngo_prof.id
 
+    from sqlalchemy import case
+
+    status_priority = case(
+        (DonationAllocation.status.in_([AllocationStatusEnum.PROPOSED.value, AllocationStatusEnum.AWAITING_RESPONSE.value]), 1),
+        else_=2
+    )
+
     query = select(DonationAllocation).options(
         selectinload(DonationAllocation.donation)
         .selectinload(Donation.donor)
-    ).order_by(DonationAllocation.created_at.desc())
+    ).order_by(status_priority, DonationAllocation.created_at.desc())
 
     query = query.where(DonationAllocation.ngo_id == ngo_id)
 
@@ -116,8 +123,6 @@ async def get_incoming_offers(
         if q and q.lower() not in d.title.lower() and q.lower() not in d.food_category.lower():
             continue
 
-        status_text = "Awaiting response"
-        tone = "amber"
         if a.status == AllocationStatusEnum.ACCEPTED.value:
             status_text = "Accepted"
             tone = "green"
@@ -126,6 +131,18 @@ async def get_incoming_offers(
             tone = "gray"
         elif a.status == AllocationStatusEnum.PROPOSED.value:
             status_text = "New offer"
+            tone = "blue"
+        elif a.status == AllocationStatusEnum.AWAITING_RESPONSE.value:
+            status_text = "Awaiting response"
+            tone = "amber"
+        elif a.status == "DELIVERED":
+            status_text = "Delivered"
+            tone = "green"
+        elif a.status == "IN_TRANSIT":
+            status_text = "In transit"
+            tone = "amber"
+        else:
+            status_text = a.status.replace("_", " ").title()
             tone = "blue"
 
         if status_filter == "new" and "Awaiting" not in status_text and "New" not in status_text:

@@ -15,9 +15,10 @@ from backend.app.models.entities import (
     RoleEnum, MissionStatusEnum
 )
 from backend.app.models.schemas import DonationCreate, DonationOut, AllocationOut
-from backend.app.auth.dependencies import require_role
+from backend.app.auth.dependencies import require_role, get_current_user
 from backend.app.services.allocation_engine import AllocationEngine
 from backend.app.services.audit_service import log_audit_event
+from backend.app.services.notification_service import create_notification, notify_role
 from backend.app.agents.orchestrator import AgentOrchestrator
 
 router = APIRouter(prefix="/donor", tags=["Donor Workspace"])
@@ -263,6 +264,20 @@ async def create_donation(
         user_id=current_user.id,
         details={"code": code, "meals": req.quantity_meals, "allocations": len(allocations)}
     )
+    await create_notification(
+        db,
+        user_id=current_user.id,
+        title=f"Donation {code} logged",
+        message=f"{req.quantity_meals} meals were submitted and matched to {len(allocations)} recipients.",
+        type="SUCCESS",
+    )
+    await notify_role(
+        db,
+        role="ops",
+        title=f"New surplus batch {code}",
+        message=f"{req.quantity_meals} meals from {donor_prof.organization_name} are ready for dispatch.",
+        type="INFO",
+    )
 
     await db.commit()
     await db.refresh(new_donation)
@@ -383,3 +398,34 @@ async def get_donation_history(
             "date": d.created_at.strftime("%d %b %Y")
         })
     return items
+
+@router.get("/donations/{donation_id}/receipt")
+async def download_donation_receipt(
+    donation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    from fastapi.responses import Response
+    from backend.app.services.receipt_service import generate_donation_receipt_pdf
+
+    query = select(Donation).options(
+        selectinload(Donation.donor),
+        selectinload(Donation.allocations).selectinload(DonationAllocation.ngo),
+        selectinload(Donation.missions)
+    )
+    id_filter = Donation.code == donation_id if donation_id.startswith("RL-") else Donation.id == donation_id
+    result = await db.execute(query.where(id_filter))
+    donation = result.scalars().first()
+    if not donation:
+        raise HTTPException(status_code=404, detail="Donation not found")
+
+    mission = donation.missions[0] if donation.missions else None
+    pdf_bytes = generate_donation_receipt_pdf(donation, donation.allocations, mission)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=RescueLoop_Receipt_{donation.code}.pdf"
+        }
+    )

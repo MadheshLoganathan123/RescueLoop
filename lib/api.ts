@@ -104,6 +104,20 @@ export const authApi = {
     return res;
   },
 
+  async forgotPassword(email: string) {
+    return request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  async resetPassword(token: string, newPassword: string) {
+    return request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
+    });
+  },
+
   async register(body: {
     email: string;
     password: string;
@@ -166,6 +180,34 @@ export const donorApi = {
 
   async getHistory() {
     return request<any[]>('/donor/history');
+  },
+
+  getReceiptUrl(id: string) {
+    return `${API_BASE}/donor/donations/${id}/receipt`;
+  },
+
+  async downloadReceipt(id: string) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('rescueloop_token') : '';
+    const res = await fetch(`${API_BASE}/donor/donations/${id}/receipt`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!res.ok) {
+      let msg = 'Failed to download receipt';
+      try {
+        const err = await res.json();
+        msg = err.detail || msg;
+      } catch {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `RescueLoop_Receipt_${id.substring(0, 8)}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   async getTodayPickups() {
@@ -231,6 +273,13 @@ export const volunteerApi = {
     return request<any>('/volunteer/availability', {
       method: 'PUT',
       body: JSON.stringify({ is_available: isAvailable })
+    });
+  },
+
+  async updateLocation(payload: { latitude: number; longitude: number; accuracy?: number; speed?: number; battery_level?: number }) {
+    return request<any>('/volunteer/location', {
+      method: 'POST',
+      body: JSON.stringify(payload)
     });
   },
 
@@ -303,6 +352,63 @@ export const opsApi = {
 
   async getAuditLogs(limit = 20) {
     return request<any[]>(`/ops/audit-trail?limit=${limit}`);
+  },
+
+  async getNetwork() {
+    return request<{ ngos: any[]; volunteers: any[]; donors: any[] }>('/ops/network');
+  },
+
+  async updateNgoNetwork(id: string, payload: any) {
+    return request<any>(`/ops/network/ngos/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  async updateVolunteerNetwork(id: string, payload: any) {
+    return request<any>(`/ops/network/volunteers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
+  }
+};
+
+// ==================== NOTIFICATIONS API ====================
+export const notificationsApi = {
+  async getAll() {
+    return request<any[]>('/notifications');
+  },
+
+  async markAsRead(id: string) {
+    return request<any>(`/notifications/${id}/read`, { method: 'PATCH' });
+  },
+
+  async markAllAsRead() {
+    return request<any>('/notifications/read-all', { method: 'POST' });
+  }
+};
+
+// ==================== UPLOADS API ====================
+export const uploadsApi = {
+  async uploadPhoto(file: File) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = typeof window !== 'undefined' ? localStorage.getItem('rescueloop_token') : '';
+    const res = await fetch(`${API_BASE}/uploads`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData
+    });
+    if (!res.ok) {
+      let msg = 'Upload failed';
+      try {
+        const err = await res.json();
+        msg = err.detail || msg;
+      } catch {}
+      return { data: null, error: msg };
+    }
+    const data = await res.json();
+    return { data, error: null };
   }
 };
 

@@ -48,4 +48,8 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Uploads
+backend/uploads/
+uploads/
 .idea/
