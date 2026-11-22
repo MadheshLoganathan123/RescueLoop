@@ -21,7 +21,7 @@ router = APIRouter(prefix="/volunteer", tags=["Volunteer Workspace"])
 
 @router.get("/dashboard-stats")
 async def get_volunteer_dashboard_stats(
-    current_user: User = Depends(require_role(["volunteer"])),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     vol_prof = current_user.volunteer_profile
@@ -66,7 +66,7 @@ async def update_availability(
 
 @router.get("/tasks/active")
 async def get_active_tasks(
-    current_user: User = Depends(require_role(["volunteer"])),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     query = select(Mission).options(

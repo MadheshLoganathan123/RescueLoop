@@ -2277,6 +2277,15 @@ function VolunteerOverview({
       if (res.data) {
         setStats(res.data);
         if (res.data.is_online !== undefined) setIsAvailable(res.data.is_online);
+      } else if (res.error && (res.error.includes('403') || res.error.includes('Forbidden'))) {
+        authApi.demoLogin('volunteer').then(() => {
+          volunteerApi.getDashboardStats().then(retryRes => {
+            if (retryRes.data) {
+              setStats(retryRes.data);
+              if (retryRes.data.is_online !== undefined) setIsAvailable(retryRes.data.is_online);
+            }
+          });
+        });
       }
     });
   }, []);
@@ -3204,12 +3213,12 @@ export default function RescueLoopApp() {
     authApi.demoLogin('donor').catch(() => {});
   }, []);
 
-  const setRoleAndHome = (r: Role, skipDemo?: boolean) => {
+  const setRoleAndHome = async (r: Role, skipDemo?: boolean) => {
+    if (!skipDemo) {
+      await authApi.demoLogin(r).catch(() => {});
+    }
     setRole(r);
     setScreen(`${r}-overview`);
-    if (!skipDemo) {
-      authApi.demoLogin(r).catch(() => {});
-    }
     notify(`Switched to ${roleMeta[r]?.label || r}`);
   };
 
@@ -3297,28 +3306,25 @@ export default function RescueLoopApp() {
           <select 
             value={screen} 
             aria-label="Jump to screen"
-            onChange={(e) => {
+            onChange={async (e) => {
               const target = e.target.value;
-              setScreen(target);
+              let targetRole: Role | null = null;
               if (target.startsWith('donor') || target === 'create-donation' || target === 'donation-details') {
-                setRole('donor');
-                authApi.demoLogin('donor').catch(() => {});
-                notify(`Navigated to Donor: ${target}`);
+                targetRole = 'donor';
               } else if (target.startsWith('ngo') || target === 'offers' || target === 'offer-detail' || target === 'requirements') {
-                setRole('ngo');
-                authApi.demoLogin('ngo').catch(() => {});
-                notify(`Navigated to NGO: ${target}`);
+                targetRole = 'ngo';
               } else if (target.startsWith('volunteer') || target === 'task') {
-                setRole('volunteer');
-                authApi.demoLogin('volunteer').catch(() => {});
-                notify(`Navigated to Volunteer: ${target}`);
+                targetRole = 'volunteer';
               } else if (target.startsWith('ops') || target === 'missions' || target === 'mission-detail') {
-                setRole('ops');
-                authApi.demoLogin('ops').catch(() => {});
-                notify(`Navigated to Operations: ${target}`);
-              } else {
-                notify(`Navigated to: ${target}`);
+                targetRole = 'ops';
               }
+
+              if (targetRole && targetRole !== role) {
+                await authApi.demoLogin(targetRole).catch(() => {});
+                setRole(targetRole);
+              }
+              setScreen(target);
+              notify(`Navigated to: ${target}`);
             }}
           >
             <option value="login">🔐 Portal Landing / Login</option>
