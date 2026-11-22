@@ -22,20 +22,79 @@ clarifying_questions (array of strings).
 Do not invent quantity, packaging, allergens, storage temperature, or shelf life.
 Use null for an unknown quantity, temperature, or shelf life; use "Not specified"
 for unknown packaging/allergens/handling notes and ask a concise question for
-important missing safety or logistics details. Use a short, descriptive title."""
+important missing safety or logistics details. Use a short, descriptive title.
+Output ONLY the JSON object — no markdown fences, no explanation."""
+
+
+def _is_openrouter(base_url: str) -> bool:
+    """Return True when the configured base URL points at OpenRouter."""
+    return "openrouter.ai" in base_url.lower()
 
 
 class IntakeAgent:
-    """Extract donation details using AgentRouter with a deterministic fallback."""
+    """
+    Extract donation details using an LLM with a deterministic rule-based fallback.
+
+    Two LLM backends are supported, selected automatically from config:
+      • OpenRouter  (AGENT_ROUTER_BASE_URL contains openrouter.ai)
+          Uses the standard OpenAI-compatible /chat/completions endpoint.
+          Response shape: {"choices": [{"message": {"content": "<json>"}}]}
+      • AgentRouter (legacy / on-premise)
+          Uses /domains/models/capabilities/chat-complete/execute endpoint.
+          Response shape: {"success": true, "completionText": "<json>"}
+
+    If AGENT_ROUTER_API_KEY or AGENT_ROUTER_MODEL is unset the class falls
+    back to deterministic regex extraction immediately.
+    """
 
     @staticmethod
-    async def _extract_with_agent_router(prompt: str) -> Optional[AiIntakeResponse]:
-        if not settings.AGENT_ROUTER_API_KEY:
+    async def _call_openrouter(prompt: str) -> Optional[str]:
+        """Call OpenRouter /chat/completions and return the raw completion text."""
+        url = f"{settings.AGENT_ROUTER_BASE_URL.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.AGENT_ROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "RescueLoop",
+        }
+        payload = {
+            "model": settings.AGENT_ROUTER_MODEL,
+            "messages": [
+                {"role": "system", "content": INTAKE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": 500,
+        }
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(settings.AGENT_ROUTER_TIMEOUT_SECONDS)
+        ) as client:
+            response = await client.post(url, headers=headers, json=payload)
+
+        if response.status_code in (401, 403):
+            logger.error("OpenRouter rejected intake credentials (HTTP %s)", response.status_code)
             return None
-        if not settings.AGENT_ROUTER_MODEL:
-            logger.warning("AgentRouter intake is configured without AGENT_ROUTER_MODEL; using rule-based extraction")
+        if response.status_code == 429:
+            logger.warning("OpenRouter rate-limited intake requests (HTTP 429) — using fallback")
+            return None
+        if response.is_error:
+            logger.warning("OpenRouter intake request failed (HTTP %s)", response.status_code)
             return None
 
+        body = response.json()
+        choices = body.get("choices") or []
+        if not choices:
+            logger.warning("OpenRouter returned no choices in intake response")
+            return None
+        content = (choices[0].get("message") or {}).get("content")
+        if not content:
+            logger.warning("OpenRouter choice had no content field")
+            return None
+        return content
+
+    @staticmethod
+    async def _call_agent_router(prompt: str) -> Optional[str]:
+        """Call the legacy AgentRouter endpoint and return the raw completion text."""
         url = (
             f"{settings.AGENT_ROUTER_BASE_URL.rstrip('/')}"
             "/domains/models/capabilities/chat-complete/execute"
@@ -54,47 +113,68 @@ class IntakeAgent:
             "max_tokens": 500,
             "allowFallback": False,
         }
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(settings.AGENT_ROUTER_TIMEOUT_SECONDS)
+        ) as client:
+            response = await client.post(url, headers=headers, json=payload)
+
+        if response.status_code in (401, 403):
+            logger.error("AgentRouter rejected intake credentials (HTTP %s)", response.status_code)
+            return None
+        if response.status_code == 429:
+            logger.warning("AgentRouter rate-limited (HTTP 429) — using fallback")
+            return None
+        if response.is_error:
+            logger.warning("AgentRouter intake request failed (HTTP %s)", response.status_code)
+            return None
+
+        body: Any = response.json()
+        if not isinstance(body, dict) or body.get("success") is not True:
+            logger.warning("AgentRouter returned an unsuccessful or malformed response")
+            return None
+        completion_text = body.get("completionText")
+        if not isinstance(completion_text, str) or not completion_text.strip():
+            logger.warning("AgentRouter response did not contain completionText")
+            return None
+        return completion_text
+
+    @staticmethod
+    async def _extract_with_llm(prompt: str) -> Optional[AiIntakeResponse]:
+        """Attempt LLM extraction; return None to signal fallback on any failure."""
+        if not settings.AGENT_ROUTER_API_KEY:
+            logger.debug("No AGENT_ROUTER_API_KEY set — skipping LLM extraction")
+            return None
+        if not settings.AGENT_ROUTER_MODEL:
+            logger.warning("AGENT_ROUTER_MODEL is not set — skipping LLM extraction")
+            return None
 
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(settings.AGENT_ROUTER_TIMEOUT_SECONDS)
-            ) as client:
-                response = await client.post(url, headers=headers, json=payload)
+            if _is_openrouter(settings.AGENT_ROUTER_BASE_URL):
+                raw = await IntakeAgent._call_openrouter(prompt)
+            else:
+                raw = await IntakeAgent._call_agent_router(prompt)
 
-            if response.status_code in (401, 403):
-                logger.error("AgentRouter rejected intake credentials (HTTP %s)", response.status_code)
-                return None
-            if response.status_code == 429:
-                logger.warning("AgentRouter rate-limited intake requests (HTTP 429)")
-                return None
-            if response.is_error:
-                logger.warning("AgentRouter intake request failed (HTTP %s)", response.status_code)
+            if raw is None:
                 return None
 
-            body: Any = response.json()
-            if not isinstance(body, dict) or body.get("success") is not True:
-                logger.warning("AgentRouter returned an unsuccessful or malformed intake response")
-                return None
-
-            completion_text = body.get("completionText")
-            if not isinstance(completion_text, str) or not completion_text.strip():
-                logger.warning("AgentRouter intake response did not contain completionText")
-                return None
-
-            text = completion_text.strip()
+            # Strip markdown fences if model wrapped output despite instructions
+            text = raw.strip()
             if text.startswith("```"):
-                text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+                text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+
             extracted = AiIntakeResponse.model_validate(json.loads(text))
             if extracted.quantity_meals is None and not extracted.needs_clarification:
                 extracted.needs_clarification = True
                 extracted.clarifying_questions.append("How many meals or portions are available?")
+            logger.info("LLM intake extraction succeeded for prompt: %s…", prompt[:40])
             return extracted
+
         except httpx.TimeoutException:
-            logger.warning("AgentRouter intake request timed out; using deterministic extraction")
+            logger.warning("LLM intake request timed out — using deterministic extraction")
         except httpx.RequestError as exc:
-            logger.warning("AgentRouter intake request could not be completed (%s)", type(exc).__name__)
-        except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
-            logger.warning("AgentRouter returned malformed intake JSON; using deterministic extraction")
+            logger.warning("LLM intake request failed (%s) — using deterministic extraction", type(exc).__name__)
+        except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as exc:
+            logger.warning("LLM returned unparseable intake JSON (%s) — using deterministic extraction", exc)
         return None
 
     @staticmethod
@@ -171,7 +251,7 @@ class IntakeAgent:
 
     @staticmethod
     async def extract_details(prompt: str) -> AiIntakeResponse:
-        extracted = await IntakeAgent._extract_with_agent_router(prompt)
+        extracted = await IntakeAgent._extract_with_llm(prompt)
         if extracted is not None:
             return extracted
         return IntakeAgent._extract_deterministically(prompt)

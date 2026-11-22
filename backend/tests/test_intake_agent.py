@@ -17,6 +17,7 @@ def install_mock_transport(monkeypatch, handler):
 
     monkeypatch.setattr(intake_agent.httpx, "AsyncClient", client_factory)
     monkeypatch.setattr(settings, "AGENT_ROUTER_API_KEY", "local-test-key")
+    # Use AgentRouter-style base URL so the legacy code path is exercised
     monkeypatch.setattr(settings, "AGENT_ROUTER_BASE_URL", "https://router.example/api/agentic-api")
     monkeypatch.setattr(settings, "AGENT_ROUTER_MODEL", "test/live-model")
 

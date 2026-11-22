@@ -339,17 +339,26 @@ function Header({
   role, 
   screen, 
   setScreen, 
-  setRole 
+  setRole,
+  liveUser,
+  onSignOut
 }: { 
   role: Role; 
   screen: Screen; 
   setScreen: (s: Screen) => void; 
   setRole: (r: Role) => void;
+  liveUser: { name: string; initials: string; org: string; subtitle: string; } | null;
+  onSignOut: () => void;
 }) {
   const meta = roleMeta[role] || roleMeta.donor;
   const navItems = navByRole[role] || navByRole.donor;
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  // Display name: use live DB user if available, fall back to seed meta
+  const displayName     = liveUser?.name     || meta.person;
+  const displayInitials = liveUser?.initials  || meta.initials;
+  const displaySubtitle = liveUser?.subtitle  || meta.subtitle;
 
   const fetchNotifications = React.useCallback(async () => {
     const res = await notificationsApi.getAll();
@@ -477,6 +486,7 @@ function Header({
           className="btn btn-sm sign-out-btn" 
           onClick={() => {
             authApi.logout();
+            onSignOut();
             setScreen('login');
           }}
           style={{ fontSize: 12, padding: '5px 10px', color: '#dc2626', borderColor: '#fca5a5' }}
@@ -492,10 +502,10 @@ function Header({
           }}
           title="Click to cycle workspace role"
         >
-          <span className="avatar">{meta.initials}</span>
+          <span className="avatar">{displayInitials}</span>
           <span className="user-info">
-            <b>{meta.person}</b>
-            <small>{meta.subtitle}</small>
+            <b>{displayName}</b>
+            <small>{displaySubtitle}</small>
           </span>
         </div>
       </div>
@@ -509,7 +519,7 @@ function Login({
   setRoleAndHome 
 }: { 
   onLogin: () => void; 
-  setRoleAndHome: (r: Role, skipDemo?: boolean) => void;
+  setRoleAndHome: (r: Role, skipDemo?: boolean, userData?: any) => void;
 }) {
   const [authMode, setAuthMode] = useState<'signin' | 'register' | 'forgot' | 'reset'>('signin');
   const [resetEmail, setResetEmail] = useState('');
@@ -521,6 +531,7 @@ function Login({
   // Sign in state
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -530,27 +541,30 @@ function Login({
   const [regFullName, setRegFullName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
-  const [regPhone, setRegPhone] = useState('+91 98765 43210');
+  const [regPhone, setRegPhone] = useState('');
   const [regOrgName, setRegOrgName] = useState('');
-  const [regAddress, setRegAddress] = useState('Anna Nagar, Chennai');
+  const [regAddress, setRegAddress] = useState('');
   const [regVehicleType, setRegVehicleType] = useState('Two-wheeler');
   const [regError, setRegError] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
 
   const handleCustomLogin = async () => {
     setLoginError('');
+    if (!email.trim()) { setLoginError('Email address is required.'); return; }
+    if (!password) { setLoginError('Password is required.'); return; }
     setIsLoggingIn(true);
     try {
-      const res = await authApi.login({ email, password });
+      const res = await authApi.login({ email: email.trim(), password });
       if (res.error) {
         setLoginError(res.error);
-        setIsLoggingIn(false);
         return;
       }
-      const targetRole = (res.data?.user?.role || res.data?.role || 'donor') as Role;
-      setRoleAndHome(targetRole, true);
+      const data = res.data;
+      const targetRole = (data?.user?.role || data?.role || 'donor') as Role;
+      const userData = data?.user || { full_name: data?.full_name, organization_name: data?.organization_name, role: targetRole };
+      setRoleAndHome(targetRole, true, userData);
     } catch (err: any) {
-      setLoginError(err.message || 'Login failed');
+      setLoginError(err.message || 'Login failed. Check your connection.');
     } finally {
       setIsLoggingIn(false);
     }
@@ -558,17 +572,12 @@ function Login({
 
   const handleRegister = async () => {
     setRegError('');
-    if (!regFullName.trim()) {
-      setRegError('Full Name is required');
-      return;
-    }
-    if (!regEmail.trim()) {
-      setRegError('Work Email Address is required');
-      return;
-    }
-    if (!regPassword.trim() || regPassword.length < 6) {
-      setRegError('Password must be at least 6 characters');
-      return;
+    if (!regFullName.trim())  { setRegError('Full name is required.'); return; }
+    if (!regEmail.trim())     { setRegError('Email address is required.'); return; }
+    if (!regEmail.includes('@')) { setRegError('Enter a valid email address.'); return; }
+    if (regPassword.length < 6) { setRegError('Password must be at least 6 characters.'); return; }
+    if (regRole !== 'volunteer' && !regOrgName.trim()) {
+      setRegError('Organisation name is required.'); return;
     }
 
     setIsRegistering(true);
@@ -576,27 +585,32 @@ function Login({
       const payload: any = {
         role: regRole,
         full_name: regFullName.trim(),
-        email: regEmail.trim(),
+        email: regEmail.trim().toLowerCase(),
         password: regPassword,
-        phone: regPhone.trim(),
-        organization_name: regOrgName.trim() || (regRole === 'volunteer' ? 'Independent Courier' : `${regFullName}'s Organization`),
-        address: regAddress.trim(),
+        phone: regPhone.trim() || undefined,
+        organization_name: regOrgName.trim() || `${regFullName.trim()}'s Organisation`,
+        address: regAddress.trim() || undefined,
       };
       if (regRole === 'volunteer') {
         payload.vehicle_type = regVehicleType;
+        delete payload.organization_name;
       }
 
       const res = await authApi.register(payload);
       if (res.error) {
         setRegError(res.error);
-        setIsRegistering(false);
         return;
       }
-
-      const targetRole = regRole as Role;
-      setRoleAndHome(targetRole, true);
+      const data = res.data;
+      const targetRole = (data?.role || regRole) as Role;
+      const userData = {
+        full_name: data?.full_name || regFullName.trim(),
+        organization_name: data?.organization_name || regOrgName.trim(),
+        role: targetRole,
+      };
+      setRoleAndHome(targetRole, true, userData);
     } catch (err: any) {
-      setRegError(err.message || 'Registration failed');
+      setRegError(err.message || 'Registration failed. Try again.');
     } finally {
       setIsRegistering(false);
     }
@@ -3718,6 +3732,14 @@ export default function RescueLoopApp() {
   const [missionId, setMissionId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Live user identity — updated on every login / register / demo-login
+  const [liveUser, setLiveUser] = useState<{
+    name: string;
+    initials: string;
+    org: string;
+    subtitle: string;
+  } | null>(null);
+
   const notify = React.useCallback((msg: string) => {
     setToastMessage(msg);
   }, []);
@@ -3728,13 +3750,55 @@ export default function RescueLoopApp() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
-  const setRoleAndHome = async (r: Role, skipDemo?: boolean) => {
+  // Hydrate liveUser from localStorage on first mount (persisted login)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = localStorage.getItem('rescueloop_user');
+    if (!raw) return;
+    try {
+      const u = JSON.parse(raw);
+      const name = u.full_name || u.name || '';
+      const org  = u.organization_name || '';
+      const r    = (u.role || 'donor') as Role;
+      setLiveUser({
+        name,
+        initials: name.split(' ').filter(Boolean).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase(),
+        org,
+        subtitle: roleMeta[r]?.subtitle || '',
+      });
+      setRole(r);
+      // If token exists, resume at workspace instead of login screen
+      const token = localStorage.getItem('rescueloop_token');
+      if (token) setScreen(`${r}-overview`);
+    } catch { /* ignore malformed data */ }
+  }, []);
+
+  const setRoleAndHome = async (r: Role, skipDemo?: boolean, userData?: any) => {
     if (!skipDemo) {
       const result = await authApi.demoLogin(r);
       if (result.error) {
         notify(result.error);
         return;
       }
+      // Update live user from demo response
+      const u = result.data?.user || result.data;
+      if (u) {
+        const name = u.full_name || u.name || roleMeta[r].person;
+        setLiveUser({
+          name,
+          initials: name.split(' ').filter(Boolean).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase(),
+          org: u.organization_name || roleMeta[r].org,
+          subtitle: roleMeta[r].subtitle,
+        });
+      }
+    } else if (userData) {
+      const name = userData.full_name || userData.name || roleMeta[r].person;
+      setLiveUser({
+        name,
+        initials: name.split(' ').filter(Boolean).map((p: string) => p[0]).join('').slice(0, 2).toUpperCase(),
+        org: userData.organization_name || roleMeta[r].org,
+        subtitle: roleMeta[r].subtitle,
+      });
     }
     setRole(r);
     setScreen(`${r}-overview`);
@@ -3768,10 +3832,14 @@ export default function RescueLoopApp() {
         return <OpsOverview setScreen={setScreen} notify={notify} setMissionId={setMissionId} />;
       case 'missions':
         return <Missions setScreen={setScreen} notify={notify} setMissionId={setMissionId} />;
+      case 'exceptions':
+        return <OpsOverview setScreen={setScreen} notify={notify} setMissionId={setMissionId} />;
       case 'mission-detail':
         return <MissionDetail setScreen={setScreen} notify={notify} missionId={missionId} />;
       case 'network':
         return <NetworkManagement setScreen={setScreen} notify={notify} />;
+      case 'activity':
+        return <History role={role} setScreen={setScreen} notify={notify} setDonationId={setDonationId} setOfferId={setOfferId} setTaskId={setTaskId} setMissionId={setMissionId} />;
       default:
         return <DonorOverview setScreen={setScreen} notify={notify} setDonationId={setDonationId} />;
     }
@@ -3800,7 +3868,9 @@ export default function RescueLoopApp() {
             role={role} 
             screen={screen} 
             setScreen={setScreen} 
-            setRole={setRoleAndHome} 
+            setRole={setRoleAndHome}
+            liveUser={liveUser}
+            onSignOut={() => { setLiveUser(null); }}
           />
           <main className="app-main">{content}</main>
         </>
