@@ -26,7 +26,12 @@ async def test_ngo_accept_offer(client: AsyncClient, ngo_token: str):
     offers_resp = await client.get("/api/v1/ngo/offers", headers=headers)
     offers = offers_resp.json()
     assert len(offers) > 0
-    offer = offers[0]
+    offer = next(
+        (item for item in offers if item["status"] in ("New offer", "Awaiting response")),
+        None,
+    )
+    if offer is None:
+        pytest.skip("No pending offer exists in the seed dataset")
     offer_id = offer["id"]
     accept_qty = offer.get("allocated_meals", 40)
 

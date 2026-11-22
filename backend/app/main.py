@@ -23,8 +23,9 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
-    async with AsyncSessionLocal() as session:
-        await init_seed_data(session)
+    if settings.ENVIRONMENT.lower() in {"development", "test"}:
+        async with AsyncSessionLocal() as session:
+            await init_seed_data(session)
 
     yield
 
@@ -44,7 +45,7 @@ app = FastAPI(
 # CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all frontend origins in development
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

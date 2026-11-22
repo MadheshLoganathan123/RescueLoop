@@ -33,11 +33,9 @@ htmlcov/
 rescueloop.db
 
 # Environment files (keep .env.example)
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+**/.env
+**/.env.*
+!**/.env.example
 
 # Logs
 logs/

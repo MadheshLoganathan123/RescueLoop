@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 from datetime import datetime
 
 # --- Auth Schemas ---
@@ -101,9 +101,13 @@ class AllocationOut(BaseModel):
         from_attributes = True
 
 class OfferResponseRequest(BaseModel):
-    accepted_meals: int
+    accepted_meals: int = Field(gt=0)
     delivery_window: Optional[str] = "04:15 PM"
     notes: Optional[str] = None
+
+class ExceptionResolutionRequest(BaseModel):
+    resolution_status: Literal["RESOLVED", "DISMISSED"]
+    action_taken: str = Field(min_length=1, max_length=2000)
 
 # --- NGO Capacity & Preferences ---
 class NgoPreferencesUpdate(BaseModel):
@@ -150,7 +154,7 @@ class TaskStepUpdate(BaseModel):
 
 class HandoverVerifyRequest(BaseModel):
     otp_code: str
-    verified_qty: int
+    verified_qty: int = Field(gt=0)
     receiver_name: str
     temp_at_drop: Optional[float] = 3.8
     notes: Optional[str] = None
@@ -179,17 +183,19 @@ class MissionOut(BaseModel):
 
 # --- AI Extract Request ---
 class AiIntakeRequest(BaseModel):
-    prompt: str
+    prompt: str = Field(min_length=1, max_length=5000)
 
 class AiIntakeResponse(BaseModel):
-    title: str
-    food_category: str
-    quantity_meals: int
-    packaging_type: str
-    storage_temp: str
-    allergens: str
-    handling_notes: str
-    estimated_shelf_life_hours: int
+    title: str = Field(min_length=1, max_length=255)
+    food_category: str = Field(min_length=1, max_length=100)
+    quantity_meals: Optional[int] = Field(default=None, gt=0)
+    packaging_type: str = Field(min_length=1, max_length=100)
+    storage_temp: Optional[str] = Field(default=None, max_length=100)
+    allergens: str = Field(min_length=1, max_length=255)
+    handling_notes: str = Field(min_length=1)
+    estimated_shelf_life_hours: Optional[int] = Field(default=None, gt=0)
+    needs_clarification: bool = False
+    clarifying_questions: List[str] = Field(default_factory=list)
 
 # --- Operational / Telemetry Map ---
 class TelemetryNode(BaseModel):

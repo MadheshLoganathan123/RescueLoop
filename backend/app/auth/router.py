@@ -9,6 +9,7 @@ from backend.app.models.entities import User, DonorProfile, NgoProfile, Voluntee
 from backend.app.models.schemas import LoginRequest, Token, UserCreate, UserOut
 from backend.app.auth.security import verify_password, get_password_hash, create_access_token
 from backend.app.auth.dependencies import get_current_user
+from backend.app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -63,6 +64,19 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
     )
     user = result.scalars().first()
 
+    demo_emails = {
+        "alex@abcrestaurant.com",
+        "sarah@hopefoundation.org",
+        "care@annagarcenter.org",
+        "jordan@rescuecouriers.org",
+        "priya@rescuecouriers.org",
+        "admin@rescueloop.org",
+    }
+    if settings.ENVIRONMENT.lower() == "production" and user and user.email in demo_emails:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Development demo accounts cannot sign in in production",
+        )
     if not user or not verify_password(str(password_val), user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -101,6 +115,10 @@ async def login(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/register", response_model=UserOut)
 async def register(req: UserCreate, db: AsyncSession = Depends(get_db)):
+    target_role = req.role.lower()
+    if target_role not in {RoleEnum.DONOR.value, RoleEnum.NGO.value, RoleEnum.VOLUNTEER.value}:
+        raise HTTPException(status_code=400, detail="Registration is limited to donor, NGO, and volunteer roles")
+
     # Check if user exists
     existing = await db.execute(select(User).where(User.email == req.email.lower().strip()))
     if existing.scalars().first():
@@ -110,7 +128,7 @@ async def register(req: UserCreate, db: AsyncSession = Depends(get_db)):
         email=req.email.lower().strip(),
         hashed_password=get_password_hash(req.password),
         full_name=req.full_name,
-        role=req.role.lower(),
+        role=target_role,
         phone=req.phone
     )
     db.add(new_user)
@@ -158,6 +176,8 @@ async def register(req: UserCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/demo-login/{role}", response_model=Token)
 async def demo_login(role: str, db: AsyncSession = Depends(get_db)):
+    if settings.ENVIRONMENT.lower() == "production":
+        raise HTTPException(status_code=404, detail="Demo sign-in is disabled")
     target_role = role.lower()
     result = await db.execute(
         select(User)

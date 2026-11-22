@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import List, Any
 from dotenv import load_dotenv
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings
 
 # Search and load .env from root and backend directories
@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "RescueLoop API"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
     
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./rescueloop.db"
@@ -42,21 +43,43 @@ class Settings(BaseSettings):
         return normalize_database_url(v)
     
     # Security
-    JWT_SECRET: str = "rescueloop-enterprise-secure-jwt-key-99887766"
+    JWT_SECRET: str = Field(
+        validation_alias=AliasChoices("JWT_SECRET", "SECRET_KEY"),
+        min_length=32,
+    )
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
     # CORS
-    CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-    ]
+    CORS_ORIGINS: List[str] = Field(
+        default=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:3001",
+            "http://127.0.0.1:3001",
+        ],
+        validation_alias=AliasChoices("CORS_ORIGINS", "BACKEND_CORS_ORIGINS"),
+    )
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def validate_jwt_secret(cls, value: str) -> str:
+        if value.startswith(("change-this-in-production", "replace-with-")) or value == "rescueloop-enterprise-secure-jwt-key-99887766":
+            raise ValueError("JWT_SECRET must be a locally generated secret, not an example/default value")
+        return value
+
+    @field_validator("CORS_ORIGINS")
+    @classmethod
+    def validate_cors_origins(cls, origins: List[str]) -> List[str]:
+        if "*" in origins:
+            raise ValueError("CORS_ORIGINS must list explicit origins when credentials are enabled")
+        return origins
     
-    # AI Agents
-    GEMINI_API_KEY: str = ""
-    AGENT_ROUTER_URL: str = ""
+    # AI Agents (Agent Router API)
+    AGENT_ROUTER_API_KEY: str = ""
+    AGENT_ROUTER_BASE_URL: str = "https://api.agentrouter.to/api/agentic-api"
+    AGENT_ROUTER_MODEL: str = ""
+    AGENT_ROUTER_TIMEOUT_SECONDS: float = 12.0
 
     class Config:
         env_file = [str(root_env), str(backend_env), ".env"]

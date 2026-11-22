@@ -206,12 +206,16 @@ async def test_e2e_full_donation_lifecycle(client: AsyncClient):
     assert step4_resp.json()["status"] == MissionStatusEnum.HANDOVER_PENDING.value
 
     # 7. Recipient verifies OTP code and handover completes
+    async with AsyncSessionLocal() as db:
+        mission = (await db.execute(select(Mission).where(Mission.code == donation_code))).scalars().first()
+        mission_otp = mission.otp_code if mission else "5821"
+
     otp_resp = await client.post(
         f"/api/v1/volunteer/tasks/{task_data['id']}/verify-otp",
         json={
             "verified_qty": accept_qty,
             "temp_at_drop": 3.6,
-            "otp_code": "5821",  # Mission OTP code
+            "otp_code": mission_otp,
             "receiver_name": "Sarah Kumar",
             "notes": "Verified fresh and cold-chain intact"
         },

@@ -13,6 +13,7 @@ from backend.app.models.entities import (
     MissionEvent, MissionAssignment, MissionStatusEnum, AssignmentStatusEnum
 )
 from backend.app.models.schemas import TelemetryNode
+from backend.app.models.schemas import ExceptionResolutionRequest
 from backend.app.auth.dependencies import get_current_user, require_role
 from backend.app.services.audit_service import log_audit_event
 from backend.app.agents.orchestrator import AgentOrchestrator
@@ -36,35 +37,60 @@ async def get_network_stats(
             ])
         )
     )
-    active_missions = res_active.scalar() or 12
+    active_missions = res_active.scalar() or 0
 
     # Active volunteer couriers online
     res_vol = await db.execute(
         select(func.count(VolunteerProfile.id)).where(VolunteerProfile.is_available == True)
     )
-    active_couriers = res_vol.scalar() or 9
+    active_couriers = res_vol.scalar() or 0
 
-    # Completed today
+    start_of_day = datetime.combine(datetime.utcnow().date(), datetime.min.time())
     res_completed = await db.execute(
-        select(func.count(Mission.id)).where(Mission.status == MissionStatusEnum.COMPLETED.value)
+        select(func.count(Mission.id)).where(
+            Mission.status == MissionStatusEnum.COMPLETED.value,
+            Mission.updated_at >= start_of_day,
+        )
     )
-    completed_today = res_completed.scalar() or 18
+    completed_today = res_completed.scalar() or 0
 
-    # Unresolved exceptions
     res_exc = await db.execute(
         select(func.count(ExceptionRecord.id)).where(ExceptionRecord.resolution_status == "OPEN")
     )
-    open_exceptions = res_exc.scalar() or 3
+    open_exceptions = res_exc.scalar() or 0
+
+    res_meals = await db.execute(
+        select(func.sum(Mission.total_meals)).where(
+            Mission.status.in_([
+                MissionStatusEnum.DISPATCHING.value,
+                MissionStatusEnum.ASSIGNED.value,
+            ])
+        )
+    )
+    meals_awaiting_pickup = res_meals.scalar() or 0
+    res_safe = await db.execute(
+        select(func.count(Mission.id)).where(
+            Mission.status == MissionStatusEnum.COMPLETED.value,
+            Mission.updated_at >= start_of_day,
+            Mission.is_cold_chain_safe.is_(True),
+        )
+    )
+    on_time_rate = round((res_safe.scalar() or 0) * 100 / completed_today, 1) if completed_today else 0
+    res_donations = await db.execute(select(func.count(Donation.id)))
+    donation_count = res_donations.scalar() or 0
+    res_missions = await db.execute(select(func.count(Mission.id)))
+    mission_count = res_missions.scalar() or 0
+    auto_match_rate = round(mission_count * 100 / donation_count, 1) if donation_count else 0
 
     return {
         "active_missions": active_missions,
-        "meals_awaiting_pickup": 240,
+        "meals_awaiting_pickup": meals_awaiting_pickup,
         "active_fleet_couriers": active_couriers,
-        "completed_today": f"{completed_today + 1480:,}" if completed_today < 100 else f"{completed_today:,}",
+        "completed_today": completed_today,
         "open_exceptions": open_exceptions,
-        "on_time_freshness_rate": "99.2%",
-        "auto_match_rate": "94.8%",
-        "daily_co2_saved_kg": 540
+        "on_time_freshness_rate": f"{on_time_rate}%",
+        "auto_match_rate": f"{auto_match_rate}%",
+        "daily_co2_saved_kg": None
     }
 
 @router.get("/telemetry/map")
@@ -76,47 +102,43 @@ async def get_map_telemetry(
     Returns live GPS coordinates and telemetry for all network nodes:
     Donors, Active Couriers, and NGO Receiver Hubs.
     """
-    nodes = [
-        # Donor Node
-        {
-            "id": "node-donor-1",
+    nodes = []
+    donors = (await db.execute(select(DonorProfile))).scalars().all()
+    volunteers = (await db.execute(
+        select(VolunteerProfile).options(selectinload(VolunteerProfile.user))
+    )).scalars().all()
+    ngos = (await db.execute(select(NgoProfile))).scalars().all()
+
+    for donor in donors:
+        nodes.append({
+            "id": donor.id,
             "type": "donor",
-            "name": "ABC Restaurant Group",
-            "lat": 13.0850,
-            "lng": 80.2101,
-            "status": "Dispatch Ready",
-            "metric": "150 meals prepared"
-        },
-        # Volunteer Courier Node in Motion
-        {
-            "id": "node-vol-1",
+            "name": donor.organization_name,
+            "lat": donor.latitude,
+            "lng": donor.longitude,
+            "status": "Active" if donor.is_verified else "Unverified",
+            "metric": donor.address,
+        })
+    for volunteer in volunteers:
+        nodes.append({
+            "id": volunteer.id,
             "type": "volunteer",
-            "name": "Jordan Mathew (Courier)",
-            "lat": 13.0865,
-            "lng": 80.2125,
-            "status": "In Transit to Drop 1",
-            "metric": "84% Battery · 18 km/h"
-        },
-        # NGO Shelters
-        {
-            "id": "node-ngo-1",
+            "name": volunteer.user.full_name if volunteer.user else "Volunteer",
+            "lat": volunteer.current_lat,
+            "lng": volunteer.current_lng,
+            "status": "Available" if volunteer.is_available else "Unavailable",
+            "metric": volunteer.vehicle_type,
+        })
+    for ngo in ngos:
+        nodes.append({
+            "id": ngo.id,
             "type": "ngo",
-            "name": "Hope Community Kitchen",
-            "lat": 13.0835,
-            "lng": 80.2140,
-            "status": "Intake Active",
-            "metric": "60 meals arriving"
-        },
-        {
-            "id": "node-ngo-2",
-            "type": "ngo",
-            "name": "Anna Nagar Care Centre",
-            "lat": 13.0890,
-            "lng": 80.2080,
-            "status": "Intake Active",
-            "metric": "50 meals arriving"
-        }
-    ]
+            "name": ngo.organization_name,
+            "lat": ngo.latitude,
+            "lng": ngo.longitude,
+            "status": "Active" if ngo.is_verified else "Unverified",
+            "metric": f"{ngo.current_free_capacity} meals capacity",
+        })
     return nodes
 
 @router.get("/missions")
@@ -127,7 +149,7 @@ async def get_missions_queue(
     db: AsyncSession = Depends(get_db)
 ):
     query = select(Mission).options(
-        selectinload(Mission.donation),
+        selectinload(Mission.donation).selectinload(Donation.donor),
         selectinload(Mission.assignments).selectinload(MissionAssignment.volunteer).selectinload(VolunteerProfile.user)
     ).order_by(Mission.created_at.desc())
 
@@ -137,9 +159,9 @@ async def get_missions_queue(
     items = []
     for m in missions:
         d = m.donation
-        donor_name = "ABC Restaurant · Anna Nagar"
+        donor_name = d.donor.organization_name if d and d.donor else "Donor"
         if d and d.pickup_address:
-            donor_name = f"ABC Restaurant · {d.pickup_address.split(',')[1].strip() if ',' in d.pickup_address else 'Anna Nagar'}"
+            donor_name = f"{donor_name} · {d.pickup_address}"
 
         courier_name = "Unassigned"
         if m.assignments:
@@ -169,7 +191,7 @@ async def get_missions_queue(
             "status": status_label,
             "tone": tone,
             "courier": courier_name,
-            "deadline": m.deadline.strftime("%I:%M %p") if m.deadline else "5:00 PM"
+            "deadline": m.deadline.strftime("%I:%M %p") if m.deadline else None
         })
     return items
 
@@ -186,44 +208,34 @@ async def get_mission_inspection(
         selectinload(Mission.events)
     )
 
-    if mission_id.startswith("RL-"):
-        result = await db.execute(query.where(Mission.code == mission_id))
-    else:
-        result = await db.execute(query.where(Mission.id == mission_id))
+    mission_filter = Mission.code == mission_id if mission_id.startswith("RL-") else Mission.id == mission_id
+    result = await db.execute(query.where(mission_filter))
 
     mission = result.scalars().first()
-    if not mission:
-        res_fb = await db.execute(query.limit(1))
-        mission = res_fb.scalars().first()
 
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
 
     d = mission.donation
-    courier_info = {
-        "name": "Jordan Mathew",
-        "phone": "+91 98401 22334",
-        "vehicle": "Hero Electric Scooter (#JM-902)",
-        "battery": "84% · GPS Telemetry Active",
-        "eta": "3:30 PM (in 12 mins)"
-    }
+    courier_info = {"name": None, "phone": None, "vehicle": None, "battery": None, "eta": None}
     if mission.assignments:
         asgn = mission.assignments[0]
         if asgn.volunteer and asgn.volunteer.user:
             courier_info["name"] = asgn.volunteer.user.full_name
-            courier_info["phone"] = asgn.volunteer.user.phone or courier_info["phone"]
+            courier_info["phone"] = asgn.volunteer.user.phone
+            courier_info["vehicle"] = asgn.volunteer.vehicle_type
 
     # Allocations
     allocations_list = []
     if d and d.allocations:
         for a in d.allocations:
             allocations_list.append({
-                "recipient": a.ngo.organization_name if a.ngo else "Hope Community Kitchen",
-                "address": a.ngo.address if a.ngo else "Anna Nagar",
+                "recipient": a.ngo.organization_name if a.ngo else None,
+                "address": a.ngo.address if a.ngo else None,
                 "requested": f"{a.allocated_meals}",
                 "allocated": f"{a.allocated_meals} meals",
                 "status": a.status,
-                "arrival": "3:45 PM"
+                "arrival": None
             })
 
     # Agent runs
@@ -235,14 +247,6 @@ async def get_mission_inspection(
             "full_decision": ar.decision_output,
             "time": ar.created_at.strftime("%I:%M %p")
         })
-
-    if not agent_runs_list:
-        agent_runs_list = [
-            {"title": "Intake Agent: Verified ABC Restaurant sanitization certificate & 3.5°C cold chain.", "time": "2:14 PM"},
-            {"title": "Matching Engine: Ranked 6 shelters; allocated to 3 highest need facilities under 3 km.", "time": "2:18 PM"},
-            {"title": "Dispatch Agent: Assigned Courier Jordan Mathew based on proximity & 40-meal carrier volume.", "time": "2:21 PM"},
-            {"title": "Recovery Monitor: Live tracking heartbeat confirmed normal trajectory.", "time": "2:38 PM"}
-        ]
 
     return {
         "id": mission.id,
@@ -263,11 +267,11 @@ async def reassign_volunteer(
     current_user: User = Depends(require_role(["ops"])),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission_filter = Mission.code == mission_id if mission_id.startswith("RL-") else Mission.id == mission_id
+    result = await db.execute(select(Mission).where(mission_filter))
     mission = result.scalars().first()
     if not mission:
-        res_fb = await db.execute(select(Mission).limit(1))
-        mission = res_fb.scalars().first()
+        raise HTTPException(status_code=404, detail="Mission not found")
 
     reassigned = await AgentOrchestrator.run_recovery_agent(
         db, mission, reason="Manual Operations dispatcher reassignment request"
@@ -290,13 +294,22 @@ async def abort_mission(
     current_user: User = Depends(require_role(["ops"])),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Mission).where(Mission.id == mission_id))
+    mission_filter = Mission.code == mission_id if mission_id.startswith("RL-") else Mission.id == mission_id
+    result = await db.execute(select(Mission).where(mission_filter))
     mission = result.scalars().first()
     if not mission:
-        res_fb = await db.execute(select(Mission).limit(1))
-        mission = res_fb.scalars().first()
+        raise HTTPException(status_code=404, detail="Mission not found")
 
     mission.status = MissionStatusEnum.CANCELLED.value
+    donation_result = await db.execute(select(Donation).where(Donation.id == mission.donation_id))
+    donation = donation_result.scalars().first()
+    if donation:
+        donation.status = "CANCELLED"
+    assignment_result = await db.execute(
+        select(MissionAssignment).where(MissionAssignment.mission_id == mission.id)
+    )
+    for assignment in assignment_result.scalars().all():
+        assignment.status = AssignmentStatusEnum.FAILED.value
     await log_audit_event(
         db,
         action="OPS_ABORT_MISSION",
@@ -329,13 +342,43 @@ async def get_exceptions(
             "created_at": r.created_at.strftime("%I:%M %p")
         })
 
-    if not items:
-        items = [
-            {"id": "exc-1", "type": "UNASSIGNED_SURPLUS", "severity": "HIGH", "description": "Mission RL-00131: Fresh Bake House surplus unassigned (45m left)", "status": "OPEN", "created_at": "12m ago"},
-            {"id": "exc-2", "type": "COLD_CHAIN_ALERT", "severity": "MEDIUM", "description": "Cold-chain probe alert: Hope Foundation storage sensor verified", "status": "RESOLVED", "created_at": "24m ago"},
-            {"id": "exc-3", "type": "TRAFFIC_BOTTLENECK", "severity": "LOW", "description": "Traffic congestion near 2nd Avenue: Alternative route sent to Courier", "status": "RESOLVED", "created_at": "35m ago"}
-        ]
     return items
+
+@router.post("/exceptions/{exception_id}/resolve")
+async def resolve_exception(
+    exception_id: str,
+    req: ExceptionResolutionRequest,
+    current_user: User = Depends(require_role(["ops"])),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ExceptionRecord).where(ExceptionRecord.id == exception_id)
+    )
+    record = result.scalars().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Exception record not found")
+    if record.resolution_status in ("RESOLVED", "DISMISSED"):
+        raise HTTPException(status_code=409, detail="Exception has already been resolved")
+
+    record.resolution_status = req.resolution_status
+    record.resolved_by = current_user.id
+    await log_audit_event(
+        db,
+        action="RESOLVE_EXCEPTION",
+        entity_type="ExceptionRecord",
+        entity_id=record.id,
+        user_id=current_user.id,
+        details={
+            "resolution_status": req.resolution_status,
+            "action_taken": req.action_taken,
+        },
+    )
+    await db.commit()
+    return {
+        "id": record.id,
+        "resolution_status": record.resolution_status,
+        "resolved_by": record.resolved_by,
+    }
 
 @router.get("/audit-trail")
 async def get_audit_trail(

@@ -1,4 +1,5 @@
 import uuid
+import secrets
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Boolean, Integer, Float, DateTime, ForeignKey, Text, Enum as SQLEnum
@@ -211,7 +212,7 @@ class Mission(Base):
     deadline = Column(DateTime, nullable=False)
     estimated_pickup = Column(DateTime, nullable=True)
     estimated_drop = Column(DateTime, nullable=True)
-    otp_code = Column(String(10), default="4492")
+    otp_code = Column(String(10), default=lambda: f"{secrets.randbelow(900000) + 100000}")
     is_cold_chain_safe = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

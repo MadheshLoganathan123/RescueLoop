@@ -56,25 +56,25 @@ const navByRole: Record<Role, { label: string; screen: Screen }[]> = {
   donor: [
     { label: 'Overview', screen: 'donor-overview' },
     { label: 'Create Donation', screen: 'create-donation' },
-    { label: 'Batch RL-00124', screen: 'donation-details' },
+    { label: 'Donation Details', screen: 'donation-details' },
     { label: 'All Donations', screen: 'history' }
   ],
   ngo: [
     { label: 'Overview', screen: 'ngo-overview' },
     { label: 'Incoming Offers', screen: 'offers' },
-    { label: 'Review RL-00128', screen: 'offer-detail' },
+    { label: 'Review Offer', screen: 'offer-detail' },
     { label: 'Capacity & Intake', screen: 'requirements' },
     { label: 'History', screen: 'history' }
   ],
   volunteer: [
     { label: 'Overview', screen: 'volunteer-overview' },
-    { label: 'Active Route RL-00124', screen: 'task' },
+    { label: 'Active Route', screen: 'task' },
     { label: 'Delivery History', screen: 'history' }
   ],
   ops: [
     { label: 'Network Console', screen: 'ops-overview' },
     { label: 'Mission Queue', screen: 'missions' },
-    { label: 'Inspect RL-00124', screen: 'mission-detail' },
+    { label: 'Inspect Mission', screen: 'mission-detail' },
     { label: 'Ledger & Audit', screen: 'history' }
   ],
 };
@@ -378,7 +378,7 @@ function Header({
         </button>
         <button 
           type="button"
-          className="btn btn-sm" 
+          className="btn btn-sm portal-landing-btn" 
           onClick={() => setScreen('login')}
           style={{ fontSize: 12, padding: '5px 10px' }}
           title="Return to Portal Login / Splash"
@@ -387,7 +387,7 @@ function Header({
         </button>
         <button 
           type="button"
-          className="btn btn-sm" 
+          className="btn btn-sm sign-out-btn" 
           onClick={() => {
             authApi.logout();
             setScreen('login');
@@ -406,7 +406,7 @@ function Header({
           title="Click to cycle workspace role"
         >
           <span className="avatar">{meta.initials}</span>
-          <span>
+          <span className="user-info">
             <b>{meta.person}</b>
             <small>{meta.subtitle}</small>
           </span>
@@ -427,8 +427,8 @@ function Login({
   const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin');
 
   // Sign in state
-  const [email, setEmail] = useState('alex@abcrestaurant.com');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -449,8 +449,7 @@ function Login({
     setLoginError('');
     setIsLoggingIn(true);
     try {
-      const pwd = password === '••••••••••••' ? 'password123' : password;
-      const res = await authApi.login({ email, password: pwd });
+      const res = await authApi.login({ email, password });
       if (res.error) {
         setLoginError(res.error);
         setIsLoggingIn(false);
@@ -512,7 +511,11 @@ function Login({
   };
 
   const handleDemoLogin = async (r: Role) => {
-    await authApi.demoLogin(r);
+    const res = await authApi.demoLogin(r);
+    if (res.error) {
+      setLoginError(res.error);
+      return;
+    }
     setRoleAndHome(r, true);
   };
 
@@ -818,22 +821,36 @@ function Login({
 // ---------------- SCREEN 2: DONOR OVERVIEW ----------------
 function DonorOverview({ 
   setScreen, 
-  notify 
+  notify,
+  setDonationId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setDonationId: (id: string) => void;
 }) { 
   const [stats, setStats] = useState<any>(null);
   const [activeDonations, setActiveDonations] = useState<any[]>([]);
+  const [pickups, setPickups] = useState<any[]>([]);
+  const [activity, setActivity] = useState<any[]>([]);
 
   useEffect(() => {
     donorApi.getDashboardStats().then(res => {
       if (res.data) setStats(res.data);
+      else if (res.error) notify(res.error);
     });
     donorApi.getActiveDonations().then(res => {
-      if (res.data && res.data.length > 0) setActiveDonations(res.data);
+      if (res.data) setActiveDonations(res.data);
+      else if (res.error) notify(res.error);
     });
-  }, []);
+    donorApi.getTodayPickups().then(res => {
+      if (res.data) setPickups(res.data);
+      else if (res.error) notify(res.error);
+    });
+    donorApi.getActivityFeed().then(res => {
+      if (res.data) setActivity(res.data);
+      else if (res.error) notify(res.error);
+    });
+  }, [notify]);
 
   return (
     <>
@@ -851,25 +868,25 @@ function DonorOverview({
       <div className="stats-grid">
         <Stat 
           label="Total Donations Rescued" 
-          value={stats ? `${stats.total_donations}` : "48"} 
+          value={stats ? `${stats.total_donations}` : "—"} 
           note="+6 this month (100% verified)" 
           icon={<Package size={18} />} 
         />
         <Stat 
           label="Meals Redistribution" 
-          value={stats ? `${stats.total_meals_rescued?.toLocaleString()}` : "2,840"} 
+          value={stats ? `${stats.total_meals_rescued?.toLocaleString()}` : "—"} 
           note="Fed 14 local community shelters" 
           icon={<CheckCircle2 size={18} />} 
         />
         <Stat 
           label="Active Missions Today" 
-          value={stats ? `${stats.active_missions}` : "3"} 
+          value={stats ? `${stats.active_missions}` : "—"} 
           note="2 awaiting pickup, 1 in transit" 
           icon={<Clock3 size={18} />} 
         />
         <Stat 
           label="Pending Logistics Action" 
-          value={stats ? `${stats.pending_actions}` : "1"} 
+          value={stats ? `${stats.pending_actions}` : "—"} 
           note="Review courier arrival time" 
           icon={<Bell size={18} />} 
         />
@@ -896,60 +913,20 @@ function DonorOverview({
               d.quantity,
               <Badge key={`b-${d.id}`} tone={d.tone || 'blue'}>{d.status}</Badge>,
               d.pickup_window,
-              <Button key={`btn-${d.id}`} sm primary onClick={() => setScreen('donation-details')}>
+              <Button key={`btn-${d.id}`} sm primary onClick={() => { setDonationId(d.id); setScreen('donation-details'); }}>
                 View Details
               </Button>
-            ]) : [
-              [
-                <div>
-                  <b>RL-00128</b>
-                  <small>Fresh vegetarian lunch boxes · Steam packaged</small>
-                </div>,
-                '80 meals',
-                <Badge tone="blue">Courier Assigned</Badge>,
-                'Today, 3:30 PM',
-                <Button sm primary onClick={() => setScreen('donation-details')}>
-                  View Details
-                </Button>
-              ],
-              [
-                <div>
-                  <b>RL-00124</b>
-                  <small>Packed rice & lentil bowls · Chilled storage</small>
-                </div>,
-                '150 meals',
-                <Badge tone="amber">In Transit (Courier en route)</Badge>,
-                'Today, 2:45 PM',
-                <Button sm onClick={() => setScreen('donation-details')}>
-                  View Details
-                </Button>
-              ],
-              [
-                <div>
-                  <b>RL-00119</b>
-                  <small>Bakery assortment & whole grain breads</small>
-                </div>,
-                '42 packs',
-                <Badge tone="green">Delivered & Verified</Badge>,
-                'Yesterday, 6:00 PM',
-                <Button sm onClick={() => setScreen('donation-details')}>
-                  View Receipt
-                </Button>
-              ]
-            ]}
+            ]) : []}
           />
         </Card>
 
         <Card>
           <SectionTitle 
             title="Today's Pickup Schedule" 
-            action={<Badge tone="blue">2 scheduled pickups</Badge>}
+            action={<Badge tone="blue">{pickups.length} scheduled pickups</Badge>}
           />
           <Timeline 
-            items={[
-              { title: 'Jordan Mathew (Courier) ETA at 3:30 PM', time: 'Mission RL-00128 · 80 meals' },
-              { title: 'Priya S. (Volunteer Van) ETA at 5:00 PM', time: 'Mission RL-00124 · 150 meals' }
-            ]}
+            items={pickups}
           />
           <div className="notice">
             <ShieldCheck size={16} style={{ display: 'inline', marginRight: 6, verticalAlign: 'text-bottom' }} />
@@ -965,11 +942,7 @@ function DonorOverview({
             action={<Badge tone="gray">Realtime</Badge>}
           />
           <Timeline 
-            items={[
-              { title: 'Donation RL-00128 submitted & safety checklist approved', time: 'Today, 2:14 PM' },
-              { title: 'AI Matching Engine allocated 80 meals to Hope Foundation', time: 'Today, 2:18 PM' },
-              { title: 'Volunteer Jordan Mathew confirmed pickup route', time: 'Today, 2:21 PM', active: true }
-            ]}
+            items={activity}
           />
         </Card>
 
@@ -996,20 +969,26 @@ function DonorOverview({
 // ---------------- SCREEN 3: CREATE DONATION FORM ----------------
 function DonationForm({ 
   setScreen, 
-  notify 
+  notify,
+  setDonationId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setDonationId: (id: string) => void;
 }) { 
-  const [title, setTitle] = useState('Surplus vegetarian lunch meals');
-  const [category, setCategory] = useState('Prepared meals (Cooked)');
-  const [quantity, setQuantity] = useState('150 meals');
-  const [prepTime, setPrepTime] = useState('21 Nov 2026, 1:00 PM');
-  const [pickupTime, setPickupTime] = useState('21 Nov 2026, 5:00 PM');
-  const [packaging, setPackaging] = useState('Sealed individual food-grade trays');
-  const [temp, setTemp] = useState('Refrigerated (3.5°C verified)');
-  const [allergens, setAllergens] = useState('Contains dairy. Vegetarian. Nut-free kitchen.');
-  const [notes, setNotes] = useState('Prepared in commercial sanitary kitchen. Tamper-evident seals applied.');
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [prepTime, setPrepTime] = useState(() => new Date().toISOString().slice(0, 16));
+  const [pickupTime, setPickupTime] = useState(() => new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().slice(0, 16));
+  const [packaging, setPackaging] = useState('');
+  const [temp, setTemp] = useState('');
+  const [allergens, setAllergens] = useState('');
+  const [notes, setNotes] = useState('');
+  const [pickupAddress, setPickupAddress] = useState('');
+  const [contactPerson, setContactPerson] = useState('');
+  const [contactPhone, setContactPhone] = useState('');
+  const [loadingDescription, setLoadingDescription] = useState('');
   
   // Interactive checklist
   const [checks, setChecks] = useState({
@@ -1020,60 +999,59 @@ function DonationForm({
     accuracy: true
   });
 
-  const handleAiAutoFill = async (type: 'lunch' | 'bakery') => {
-    const promptText = type === 'lunch'
-      ? '150 fresh hot vegetarian lunch boxes with lentils and rice, refrigerated 3C, dairy'
-      : '45 artisanal whole wheat bread baskets in sealed paper wraps, ambient';
-    const res = await aiApi.intakeCopilot(promptText);
-    if (res.data) {
-      if (res.data.title) setTitle(res.data.title);
-      if (res.data.food_category) setCategory(res.data.food_category);
-      if (res.data.quantity_meals) setQuantity(`${res.data.quantity_meals} meals`);
-      if (res.data.packaging_type) setPackaging(res.data.packaging_type);
-      if (res.data.storage_temp) setTemp(res.data.storage_temp);
-      if (res.data.allergens) setAllergens(res.data.allergens);
-      notify(`AI Copilot Extracted: ${res.data.title}`);
-    } else {
-      if (type === 'lunch') {
-        setTitle('150 Fresh Vegetarian Lunch Boxes');
-        setCategory('Prepared hot/chilled meals');
-        setQuantity('150 boxed meals');
-        setPackaging('Individually sealed trays in insulated cartons');
-        setTemp('Refrigerated at 3°C');
-        setAllergens('Dairy present; vegetarian');
-        notify('AI Auto-fill: Applied 150 Hot Lunch Boxes specifications');
-      } else {
-        setTitle('45 Assorted Artisanal Bread & Pastry Baskets');
-        setCategory('Baked goods');
-        setQuantity('45 family packages');
-        setPackaging('Food-grade paper wraps in sealed crates');
-        setTemp('Ambient storage (clean, dry)');
-        setAllergens('Wheat/gluten present; nut-free');
-        notify('AI Auto-fill: Applied 45 Bakery Packages specifications');
-      }
+  const handleAiAutoFill = async () => {
+    if (!loadingDescription.trim()) {
+      notify('Describe the donation before asking AI to extract its details.');
+      return;
     }
+    const res = await aiApi.intakeCopilot(loadingDescription.trim());
+    if (res.error || !res.data) {
+      notify(res.error || 'AI intake did not return valid donation details.');
+      return;
+    }
+    if (res.data.title) setTitle(res.data.title);
+    if (res.data.food_category) setCategory(res.data.food_category);
+    if (res.data.quantity_meals != null) setQuantity(String(res.data.quantity_meals));
+    if (res.data.packaging_type) setPackaging(res.data.packaging_type);
+    if (res.data.storage_temp) setTemp(res.data.storage_temp);
+    if (res.data.allergens) setAllergens(res.data.allergens);
+    if (res.data.handling_notes) setNotes(res.data.handling_notes);
+    notify(res.data.needs_clarification
+      ? `Details extracted. Please confirm: ${res.data.clarifying_questions.join(' ')}`
+      : 'Donation details extracted. Review them before submitting.');
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const qtyNum = parseInt(quantity.replace(/[^0-9]/g, '')) || 150;
+    const qtyNum = parseInt(quantity.replace(/[^0-9]/g, ''), 10);
+    if (!title.trim() || !category.trim() || !Number.isInteger(qtyNum) || qtyNum < 1 || !pickupAddress.trim()) {
+      notify('Enter a title, food category, positive quantity, and pickup address.');
+      return;
+    }
+    if (!checks.accuracy) {
+      notify('Confirm the food-safety certification before submitting.');
+      return;
+    }
     const res = await donorApi.createDonation({
-      title,
-      food_category: category,
+      title: title.trim(),
+      food_category: category.trim(),
       quantity_meals: qtyNum,
       packaging_type: packaging,
       storage_temp: temp,
       allergens,
       handling_notes: notes,
-      pickup_address: '24, 2nd Avenue, Anna Nagar, Chennai',
-      on_site_contact: 'Chef Alex Rivera',
-      contact_phone: '+91 98765 43210'
+      prep_time: new Date(prepTime).toISOString(),
+      latest_pickup_time: new Date(pickupTime).toISOString(),
+      pickup_address: pickupAddress.trim(),
+      on_site_contact: contactPerson.trim(),
+      contact_phone: contactPhone.trim()
     });
-    if (res.data?.code) {
-      notify(`Donation ${res.data.code} created & stored in database! Matching engine allocated meals.`);
-    } else {
-      notify('Donation RL-00129 created! Recipient matching engine initiated.');
+    if (res.error || !res.data) {
+      notify(res.error || 'Donation could not be created.');
+      return;
     }
+    setDonationId(res.data.id || res.data.code);
+    notify(`Donation ${res.data.code} created and submitted for matching.`);
     setScreen('donation-details');
   };
 
@@ -1087,7 +1065,13 @@ function DonationForm({
         backLabel="Back to Donor Overview"
         action={
           <div className="actions">
-            <Button onClick={() => { notify('Draft saved to local storage.'); }}>Save Draft</Button>
+            <Button onClick={() => {
+              localStorage.setItem('rescueloop_donation_draft', JSON.stringify({
+                title, category, quantity, prepTime, pickupTime, packaging, temp, allergens, notes,
+                pickupAddress, contactPerson, contactPhone
+              }));
+              notify('Donation draft saved on this device.');
+            }}>Save Draft</Button>
             <Button primary onClick={handleSubmit}>Submit for Rescue Matching</Button>
           </div>
         }
@@ -1104,8 +1088,8 @@ function DonationForm({
               <Input label="Donation Title / Summary" value={title} onChange={(e) => setTitle(e.target.value)} />
               <Input label="Food Category" value={category} onChange={(e) => setCategory(e.target.value)} />
               <Input label="Exact Quantity Available" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-              <Input label="Preparation Timestamp" value={prepTime} onChange={(e) => setPrepTime(e.target.value)} />
-              <Input label="Latest Safe Pickup Window" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} />
+              <Input label="Preparation Timestamp" type="datetime-local" value={prepTime} onChange={(e) => setPrepTime(e.target.value)} />
+              <Input label="Latest Safe Pickup Window" type="datetime-local" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} />
               <Input label="Packaging & Containment" value={packaging} onChange={(e) => setPackaging(e.target.value)} />
               <Input label="Storage Temperature" value={temp} onChange={(e) => setTemp(e.target.value)} />
               <Input label="Known Allergens & Diet Types" value={allergens} onChange={(e) => setAllergens(e.target.value)} />
@@ -1121,10 +1105,9 @@ function DonationForm({
               subtitle="Where the volunteer courier should report"
             />
             <div className="form-grid">
-              <Input label="Kitchen / Warehouse Address" value="24, 2nd Avenue, Anna Nagar, Chennai" />
-              <Input label="Primary On-site Contact" value="Chef Alex Rivera" />
-              <Input label="Direct Dispatch Contact Number" value="+91 98765 43210" />
-              <Input label="Loading Dock Instructions" value="Enter through Service Bay 2 behind main entrance" />
+              <Input label="Kitchen / Warehouse Address" value={pickupAddress} onChange={(e) => setPickupAddress(e.target.value)} />
+              <Input label="Primary On-site Contact" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} />
+              <Input label="Direct Dispatch Contact Number" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
             </div>
 
             <div className="form-footer">
@@ -1149,15 +1132,13 @@ function DonationForm({
               subtitle="Describe surplus naturally or use rapid presets" 
               action={<Badge tone="purple"><Sparkles size={12} /> Smart Form</Badge>}
             />
-            <p>One-click sample presets to simulate real donor inputs:</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-              <Button sm secondary onClick={() => handleAiAutoFill('lunch')}>
-                <Package size={14} /> Preset: 150 Cooked Lunch Trays
-              </Button>
-              <Button sm secondary onClick={() => handleAiAutoFill('bakery')}>
-                <Package size={14} /> Preset: 45 Assorted Bakery Packs
-              </Button>
-            </div>
+            <label className="field">
+              <span>Describe the donation in your own words</span>
+              <textarea value={loadingDescription} onChange={(e) => setLoadingDescription(e.target.value)} />
+            </label>
+            <Button sm secondary onClick={handleAiAutoFill} style={{ margin: '10px 0 14px' }}>
+              <Sparkles size={14} /> Extract Intake Details
+            </Button>
             <p className="notice" style={{ marginTop: 0 }}>
               RescueLoop AI parses quantities, storage prerequisites, and recipient matches in under 3 seconds.
             </p>
@@ -1212,27 +1193,67 @@ function DonationForm({
 // ---------------- SCREEN 4: DONATION DETAILS ----------------
 function DonationDetails({ 
   setScreen, 
-  notify 
+  notify,
+  donationId,
+  setTaskId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  donationId: string | null;
+  setTaskId: (id: string) => void;
 }) { 
+  const [donation, setDonation] = useState<any>(null);
+
+  useEffect(() => {
+    const loadDonation = async () => {
+      let id = donationId;
+      if (!id) {
+        const active = await donorApi.getActiveDonations();
+        if (active.error) {
+          notify(active.error);
+          return;
+        }
+        id = active.data?.[0]?.id || null;
+      }
+      if (!id) {
+        const history = await donorApi.getHistory();
+        if (history.error) {
+          notify(history.error);
+          return;
+        }
+        id = history.data?.[0]?.id || null;
+      }
+      if (!id) {
+        notify('No donation records are available for this account.');
+        return;
+      }
+      const result = await donorApi.getDonationDetails(id);
+      if (result.error || !result.data) {
+        notify(result.error || 'Donation details could not be loaded.');
+        return;
+      }
+      setDonation(result.data);
+    };
+    loadDonation();
+  }, [donationId, notify]);
+
+  const statusTone = donation?.status === 'COMPLETED' ? 'green' : donation?.status === 'IN_TRANSIT' ? 'amber' : 'blue';
+  const quantity = donation ? `${donation.quantity_meals} meals` : '—';
+
   return (
     <>
       <PageHead 
-        eyebrow="DONOR / DONATION DETAILS / RL-00124" 
-        title="Mission RL-00124 Tracking" 
-        subtitle="150 Vegetarian Lunch Boxes · Split delivery to 3 community centers in Anna Nagar" 
+        eyebrow={`DONOR / DONATION DETAILS / ${donation?.code || ''}`} 
+        title={donation ? `Donation ${donation.code}` : 'Donation Details'} 
+        subtitle={donation ? `${donation.title} · ${donation.allocations.length} recipient allocations` : 'Loading donation record…'} 
         onBack={() => setScreen('donor-overview')}
         backLabel="Back to Donor Overview"
         action={
           <div className="actions">
-            <Button onClick={() => notify('Verified Donation Tax Receipt downloaded (PDF).')}>
-              <Download size={14} /> Download Receipt
+            <Button onClick={() => window.print()} disabled={!donation}>
+              <Download size={14} /> Print Receipt
             </Button>
-            <Button primary onClick={() => setScreen('ops-overview')}>
-              View Live Mission Radar
-            </Button>
+            <Button primary onClick={() => setScreen('history')}>View Donation History</Button>
           </div>
         }
       />
@@ -1241,72 +1262,51 @@ function DonationDetails({
         <div>
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
-              title="Batch Overview: RL-00124" 
-              action={<Badge tone="amber">Active · In Transit</Badge>}
+              title={`Batch Overview: ${donation?.code || '—'}`} 
+              action={<Badge tone={statusTone}>{donation?.status?.replaceAll('_', ' ') || 'Loading'}</Badge>}
             />
             <div className="metric-row">
-              <b>FOOD CATEGORY<strong>Vegetarian Meals</strong><small>Nutritious cooked</small></b>
-              <b>BATCH VOLUME<strong>150 Meals</strong><small>3 recipient drops</small></b>
-              <b>PREPARATION<strong>Today, 1:00 PM</strong><small>Chef signed</small></b>
-              <b>MAX PICKUP<strong>5:00 PM</strong><small>Freshness window</small></b>
+              <b>FOOD CATEGORY<strong>{donation?.food_category || '—'}</strong></b>
+              <b>BATCH VOLUME<strong>{quantity}</strong><small>{donation?.allocations.length || 0} recipient drops</small></b>
+              <b>PREPARATION<strong>{donation?.prep_time || '—'}</strong></b>
+              <b>MAX PICKUP<strong>{donation?.latest_pickup || '—'}</strong></b>
             </div>
           </Card>
 
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
-              title="Automated Recipient Split Allocation" 
-              subtitle="AI matching algorithm distributed 100% of volume based on shelter demand"
-              action={<Badge tone="green">150 / 150 Allocated</Badge>}
+              title="Recipient Allocations" 
+              subtitle="Current allocation and acceptance state for this donation"
+              action={<Badge tone="green">{donation?.allocations.length || 0} recipients</Badge>}
             />
             <Table 
               headers={['SHELTER / RECIPIENT', 'ALLOCATED', 'CAPACITY CHECK', 'DELIVERY STATUS']} 
-              rows={[
-                [
+              rows={(donation?.allocations || []).map((allocation: any, index: number) => [
                   <div>
-                    <b>Hope Community Kitchen</b>
-                    <small>18, 5th Street, Anna Nagar</small>
+                    <b>{allocation.ngo_name || 'Recipient'}</b>
+                    <small>{allocation.address || 'Address unavailable'}</small>
                   </div>,
-                  '60 meals',
-                  <Badge tone="green">Accepted (70 free)</Badge>,
-                  'Drop #1 (Arriving 3:45 PM)'
-                ],
-                [
-                  <div>
-                    <b>Anna Nagar Care Centre</b>
-                    <small>12, 11th Main Road, Anna Nagar</small>
-                  </div>,
-                  '50 meals',
-                  <Badge tone="green">Accepted (60 free)</Badge>,
-                  'Drop #2 (Arriving 4:15 PM)'
-                ],
-                [
-                  <div>
-                    <b>Meals for All Foundation</b>
-                    <small>45, Round Table Ave, Shenoy Nagar</small>
-                  </div>,
-                  '40 meals',
-                  <Badge tone="green">Accepted (40 free)</Badge>,
-                  'Drop #3 (Arriving 4:40 PM)'
-                ]
-              ]}
+                  allocation.allocated_meals,
+                  <Badge tone={allocation.status === 'ACCEPTED' ? 'green' : allocation.status === 'DECLINED' ? 'gray' : 'amber'}>{allocation.status}</Badge>,
+                  allocation.delivery_window || `Drop #${index + 1}`
+                ])}
             />
           </Card>
 
           <Card>
             <SectionTitle 
               title="Pickup Facility & Safety Parameters" 
-              action={<Button sm onClick={() => setScreen('create-donation')}>Edit Information</Button>}
             />
             <div className="detail-grid">
               <p>
                 <small>DISPATCH LOCATION</small>
-                <b>24, 2nd Avenue, Anna Nagar</b>
-                Chennai, Tamil Nadu 600040 (Dock 2)
+                <b>{donation?.pickup_address || '—'}</b>
+                {donation?.contact_person || ''}
               </p>
               <p>
                 <small>STORAGE PREREQUISITES</small>
-                <b>Refrigerated · Sealed Trays</b>
-                Vegetarian · Contains dairy · Zero nuts
+                <b>{donation?.storage_temp || 'Not specified'}</b>
+                {donation?.allergens || 'Allergen information not specified'}
               </p>
             </div>
           </Card>
@@ -1316,29 +1316,25 @@ function DonationDetails({
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
               title="Assigned Volunteer Courier" 
-              action={<Badge tone="blue">Dispatched</Badge>}
+              action={<Badge tone={donation?.courier?.status === 'COMPLETED' ? 'green' : 'blue'}>{donation?.courier?.status?.replaceAll('_', ' ') || 'Not assigned'}</Badge>}
             />
-            <div className="person-row">
-              <span className="avatar">JM</span>
+            {donation?.courier?.name ? <div className="person-row">
+              <span className="avatar">{donation.courier.name.split(' ').map((part: string) => part[0]).join('').slice(0, 2)}</span>
               <div>
-                <b>Jordan Mathew</b>
-                <small>Two-wheeler courier · Insulated thermal carrier</small>
+                <b>{donation.courier.name}</b>
+                <small>{donation.courier.vehicle || 'Volunteer courier'}</small>
               </div>
-            </div>
+            </div> : <p>No courier has been assigned yet.</p>}
             <hr />
             <div className="between">
               <span>Courier Contact:</span>
-              <b>+91 98401 22334</b>
+              <b>{donation?.courier?.phone || 'Not available'}</b>
             </div>
             <div className="between">
               <span>Current Status:</span>
-              <b>En route to donor kitchen</b>
+              <b>{donation?.courier?.status?.replaceAll('_', ' ') || 'Awaiting dispatch'}</b>
             </div>
-            <div className="between">
-              <span>Estimated Pickup:</span>
-              <b>3:30 PM (in 15 mins)</b>
-            </div>
-            <Button primary className="full" style={{ marginTop: 14 }} onClick={() => setScreen('task')}>
+            <Button primary className="full" style={{ marginTop: 14 }} disabled={!donation} onClick={() => { setTaskId(donation.code); setScreen('task'); }}>
               View Volunteer Live Manifest <ExternalLink size={14} />
             </Button>
           </Card>
@@ -1346,16 +1342,10 @@ function DonationDetails({
           <Card>
             <SectionTitle 
               title="Rescue Progress Stepper" 
-              action={<small style={{ color: '#10b981', fontWeight: 700 }}>● Active Mission</small>}
+              action={<small style={{ color: '#10b981', fontWeight: 700 }}>{donation?.status?.replaceAll('_', ' ') || 'Loading'}</small>}
             />
             <Timeline 
-              items={[
-                { title: 'Donation RL-00124 Submitted by Kitchen', time: 'Today, 2:14 PM' },
-                { title: 'AI Matching: 3 Shelters Confirmed Capacity', time: 'Today, 2:18 PM' },
-                { title: 'Volunteer Jordan Mathew Accepted Mission', time: 'Today, 2:21 PM', active: true },
-                { title: 'Pickup & Temperature Handover', time: 'Pending (ETA 3:30 PM)' },
-                { title: 'Final Handover at Shelter 3', time: 'Scheduled for 4:40 PM' }
-              ]}
+              items={donation ? [{ title: `Donation ${donation.code}: ${donation.status.replaceAll('_', ' ').toLowerCase()}`, time: donation.latest_pickup }] : []}
             />
           </Card>
         </div>
@@ -1368,99 +1358,49 @@ function DonationDetails({
 function History({ 
   role, 
   setScreen, 
-  notify 
+  notify,
+  setDonationId,
+  setOfferId,
+  setTaskId,
+  setMissionId
 }: { 
   role: Role; 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setDonationId: (id: string) => void;
+  setOfferId: (id: string) => void;
+  setTaskId: (id: string) => void;
+  setMissionId: (id: string) => void;
 }) { 
   const ops = role === 'ops';
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'transit' | 'delivered' | 'review'>('all');
 
-  const historyData = [
-    {
-      id: 'RL-00124',
-      name: 'ABC Restaurant · Anna Nagar',
-      food: '150 Vegetarian Lunch Meals',
-      quantity: '150 meals',
-      stops: '3 stops',
-      status: 'In transit',
-      tone: 'amber' as const,
-      volunteer: 'Jordan Mathew',
-      date: 'Today, 2:45 PM',
-      creator: 'Alex Rivera'
-    },
-    {
-      id: 'RL-00128',
-      name: 'ABC Restaurant · Anna Nagar',
-      food: '80 Vegetarian Meal Trays',
-      quantity: '80 meals',
-      stops: '2 stops',
-      status: 'Pickup assigned',
-      tone: 'blue' as const,
-      volunteer: 'Priya S.',
-      date: 'Today, 3:30 PM',
-      creator: 'Alex Rivera'
-    },
-    {
-      id: 'RL-00131',
-      name: 'Fresh Bake House · Kilpauk',
-      food: '35 Artisanal Bread Packages',
-      quantity: '35 packs',
-      stops: '1 stop',
-      status: 'Needs volunteer',
-      tone: 'red' as const,
-      volunteer: 'Unassigned',
-      date: 'Today, 5:00 PM',
-      creator: 'Elena Gomez'
-    },
-    {
-      id: 'RL-00119',
-      name: 'ABC Restaurant · Anna Nagar',
-      food: '42 Bakery Assortments',
-      quantity: '42 packs',
-      stops: '1 stop',
-      status: 'Delivered',
-      tone: 'green' as const,
-      volunteer: 'Rohan Verma',
-      date: '20 Nov 2026',
-      creator: 'Alex Rivera'
-    },
-    {
-      id: 'RL-00112',
-      name: 'Green Plate Cafe · Shenoy Nagar',
-      food: '60 Rice & Curry Containers',
-      quantity: '60 meals',
-      stops: '2 stops',
-      status: 'Delivered',
-      tone: 'green' as const,
-      volunteer: 'Jordan Mathew',
-      date: '19 Nov 2026',
-      creator: 'Sarah Kumar'
-    }
-  ];
-
-  const [historyList, setHistoryList] = useState<any[]>(historyData);
+  const [historyList, setHistoryList] = useState<any[]>([]);
 
   useEffect(() => {
     if (role === 'donor') {
       donorApi.getHistory().then(res => {
-        if (res.data && res.data.length > 0) setHistoryList(res.data);
+        if (res.data) setHistoryList(res.data);
+        else if (res.error) notify(res.error);
       });
     } else if (role === 'ngo') {
       ngoApi.getHistory().then(res => {
-        if (res.data && res.data.length > 0) setHistoryList(res.data);
+        if (res.data) setHistoryList(res.data);
+        else if (res.error) notify(res.error);
       });
     } else if (role === 'volunteer') {
       volunteerApi.getHistory().then(res => {
-        if (res.data && res.data.length > 0) setHistoryList(res.data);
+        if (res.data) setHistoryList(res.data);
+        else if (res.error) notify(res.error);
       });
     } else if (role === 'ops') {
       opsApi.getAuditLogs().then(res => {
-        if (res.data && res.data.length > 0) {
+        if (res.data) {
           const mapped = res.data.map((log: any) => ({
-            id: log.entity_id ? log.entity_id.slice(0, 8) : 'AUDIT',
+            id: log.entity_id || 'AUDIT',
+            uuid: log.entity_id,
+            entity_type: log.entity_type,
             name: `${log.actor_role?.toUpperCase() || 'SYSTEM'}: ${log.action}`,
             food: log.details?.status ? `Status: ${log.details.status}` : 'System operation',
             quantity: log.details?.meals ? `${log.details.meals} meals` : '1 event',
@@ -1472,22 +1412,36 @@ function History({
             creator: log.actor_role || 'audit'
           }));
           setHistoryList(mapped);
-        }
+        } else if (res.error) notify(res.error);
       });
     }
-  }, [role]);
+  }, [role, notify]);
 
   const filtered = historyList.filter((item) => {
     const matchesSearch = 
-      item.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.food.toLowerCase().includes(searchQuery.toLowerCase());
+      String(item.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(item.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(item.food || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     if (activeTab === 'transit') return matchesSearch && item.status.includes('transit');
     if (activeTab === 'delivered') return matchesSearch && item.status.includes('Delivered');
     if (activeTab === 'review') return matchesSearch && (item.status.includes('volunteer') || item.status.includes('assigned'));
     return matchesSearch;
   });
+
+  const exportHistory = () => {
+    const columns = ['id', 'name', 'food', 'quantity', 'status', 'date'];
+    const csv = [
+      columns.join(','),
+      ...filtered.map((item) => columns.map((key) => `"${String(item[key] ?? '').replaceAll('"', '""')}"`).join(','))
+    ].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'rescueloop-history.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <>
@@ -1496,7 +1450,7 @@ function History({
         title={ops ? 'Master Dispatch Archive & Telemetry' : 'Food Rescue History & Audits'} 
         subtitle={ops ? 'Comprehensive ledger of missions, automated allocations and exceptions.' : 'Review delivered rescue handovers, verify receipts and export tax deduction statements.'} 
         action={
-          <Button primary onClick={() => notify('Historical export CSV compiled and downloaded.')}>
+          <Button primary onClick={exportHistory}>
             <Download size={14} /> Export Audit Report (CSV)
           </Button>
         }
@@ -1506,16 +1460,16 @@ function History({
         <div className="toolbar">
           <div className="tabs">
             <button className={activeTab === 'all' ? 'active' : ''} onClick={() => setActiveTab('all')}>
-              All Missions ({historyData.length})
+              All Records ({historyList.length})
             </button>
             <button className={activeTab === 'transit' ? 'active' : ''} onClick={() => setActiveTab('transit')}>
-              In Transit (1)
+              In Transit ({historyList.filter(item => item.status?.toLowerCase().includes('transit')).length})
             </button>
             <button className={activeTab === 'delivered' ? 'active' : ''} onClick={() => setActiveTab('delivered')}>
-              Delivered & Verified (2)
+              Delivered & Verified ({historyList.filter(item => item.status?.toLowerCase().includes('deliver')).length})
             </button>
             <button className={activeTab === 'review' ? 'active' : ''} onClick={() => setActiveTab('review')}>
-              Needs Attention (2)
+              Needs Attention ({historyList.filter(item => item.status?.toLowerCase().includes('pending') || item.status?.toLowerCase().includes('assigned')).length})
             </button>
           </div>
           <div className="actions">
@@ -1549,7 +1503,15 @@ function History({
                 <Badge key={`badge-${item.id}`} tone={item.tone}>{item.status}</Badge>,
                 item.volunteer,
                 item.date,
-                <Button key={`btn-${item.id}`} sm primary onClick={() => setScreen('mission-detail')}>
+                <Button key={`btn-${item.id}`} sm primary onClick={() => {
+                  if (item.entity_type === 'Donation') {
+                    setDonationId(item.uuid || item.id);
+                    setScreen('donation-details');
+                  } else {
+                    setMissionId(item.uuid || item.id);
+                    setScreen('mission-detail');
+                  }
+                }}>
                   Inspect
                 </Button>
               ];
@@ -1563,7 +1525,18 @@ function History({
                 item.quantity,
                 <Badge key={`badge-${item.id}`} tone={item.tone}>{item.status}</Badge>,
                 item.date,
-                <Button key={`btn-${item.id}`} sm onClick={() => setScreen('donation-details')}>
+                <Button key={`btn-${item.id}`} sm onClick={() => {
+                  if (role === 'donor') {
+                    setDonationId(item.uuid || item.id);
+                    setScreen('donation-details');
+                  } else if (role === 'ngo') {
+                    setOfferId(item.uuid || item.id);
+                    setScreen('offer-detail');
+                  } else {
+                    setTaskId(item.uuid || item.id);
+                    setScreen('task');
+                  }
+                }}>
                   View Details
                 </Button>
               ];
@@ -1774,67 +1747,26 @@ function NgoOverview({
 // ---------------- SCREEN 7: OFFERS LIST ----------------
 function Offers({ 
   setScreen, 
-  notify 
+  notify,
+  setOfferId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setOfferId: (id: string) => void;
 }) { 
   const [activeTab, setActiveTab] = useState<'all' | 'new' | 'accepted' | 'declined'>('all');
   const [search, setSearch] = useState('');
-
-  const offers = [
-    {
-      id: 'RL-00128',
-      donor: 'ABC Restaurant',
-      location: 'Anna Nagar · 1.8 km',
-      food: 'Vegetarian Cooked Lunch Trays',
-      quantity: '80 meals',
-      window: '3:30 - 5:00 PM',
-      status: 'Awaiting response',
-      tone: 'amber' as const
-    },
-    {
-      id: 'RL-00130',
-      donor: 'Fresh Bake House',
-      location: 'Kilpauk · 2.4 km',
-      food: 'Artisanal Breads & Baguettes',
-      quantity: '40 packs',
-      window: '2:00 - 4:00 PM',
-      status: 'New offer',
-      tone: 'blue' as const
-    },
-    {
-      id: 'RL-00124',
-      donor: 'Green Plate Cafe',
-      location: 'Shenoy Nagar · 1.2 km',
-      food: 'Prepared Rice & Vegetable Curries',
-      quantity: '60 meals',
-      window: '5:00 - 6:00 PM',
-      status: 'Accepted',
-      tone: 'green' as const
-    },
-    {
-      id: 'RL-00115',
-      donor: 'City Caterers',
-      location: 'Aminjikarai · 3.1 km',
-      food: 'Packed Banquet Dinner Meals',
-      quantity: '100 meals',
-      window: '6:00 - 7:30 PM',
-      status: 'Declined (Exceeded space)',
-      tone: 'gray' as const
-    }
-  ];
-
-  const [offersList, setOffersList] = useState<any[]>(offers);
+  const [offersList, setOffersList] = useState<any[]>([]);
 
   useEffect(() => {
-    ngoApi.getOffers(activeTab, search).then(res => {
-      if (res.data && res.data.length > 0) setOffersList(res.data);
+    ngoApi.getOffers('all', search).then(res => {
+      if (res.data) setOffersList(res.data);
+      else if (res.error) notify(res.error);
     });
-  }, [activeTab, search]);
+  }, [activeTab, search, notify]);
 
   const filtered = offersList.filter((o) => {
-    const match = o.donor.toLowerCase().includes(search.toLowerCase()) || o.food.toLowerCase().includes(search.toLowerCase());
+    const match = String(o.donor || '').toLowerCase().includes(search.toLowerCase()) || String(o.food || '').toLowerCase().includes(search.toLowerCase());
     if (activeTab === 'new') return match && (o.status.includes('New') || o.status.includes('Awaiting'));
     if (activeTab === 'accepted') return match && o.status.includes('Accepted');
     if (activeTab === 'declined') return match && o.status.includes('Declined');
@@ -1858,16 +1790,16 @@ function Offers({
         <div className="toolbar">
           <div className="tabs">
             <button className={activeTab === 'all' ? 'active' : ''} onClick={() => setActiveTab('all')}>
-              All Offers ({offers.length})
+              All Offers ({offersList.length})
             </button>
             <button className={activeTab === 'new' ? 'active' : ''} onClick={() => setActiveTab('new')}>
-              Awaiting Action (2)
+              Awaiting Action ({offersList.filter(o => o.status.includes('New') || o.status.includes('Awaiting')).length})
             </button>
             <button className={activeTab === 'accepted' ? 'active' : ''} onClick={() => setActiveTab('accepted')}>
-              Accepted (1)
+              Accepted ({offersList.filter(o => o.status.includes('Accepted')).length})
             </button>
             <button className={activeTab === 'declined' ? 'active' : ''} onClick={() => setActiveTab('declined')}>
-              Declined (1)
+              Declined ({offersList.filter(o => o.status.includes('Declined')).length})
             </button>
           </div>
           <div className="actions">
@@ -1879,7 +1811,7 @@ function Offers({
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button sm><Filter size={13} /> Filter</Button>
+            <Button sm onClick={() => setSearch('')}><Filter size={13} /> Clear Search</Button>
           </div>
         </div>
 
@@ -1894,7 +1826,7 @@ function Offers({
             item.quantity,
             item.window,
             <Badge key={`b-${item.id}`} tone={item.tone}>{item.status}</Badge>,
-            <Button key={`btn-${item.id}`} sm primary onClick={() => setScreen('offer-detail')}>
+            <Button key={`btn-${item.id}`} sm primary onClick={() => { setOfferId(item.id); setScreen('offer-detail'); }}>
               Inspect Offer
             </Button>
           ])}
@@ -1907,40 +1839,87 @@ function Offers({
 // ---------------- SCREEN 8: OFFER DETAIL & ACCEPTANCE ----------------
 function OfferDetail({ 
   setScreen, 
-  notify 
+  notify,
+  offerId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  offerId: string | null;
 }) { 
-  const [acceptedQty, setAcceptedQty] = useState('60');
-  const [receivingSlot, setReceivingSlot] = useState('4:15 PM');
-  const [note, setNote] = useState('Our staff kitchen coordinator will receive at rear loading bay.');
+  const [offer, setOffer] = useState<any>(null);
+  const [acceptedQty, setAcceptedQty] = useState('');
+  const [receivingSlot, setReceivingSlot] = useState('');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    const loadOffer = async () => {
+      let id = offerId;
+      if (!id) {
+        const offers = await ngoApi.getOffers('all');
+        if (offers.error) {
+          notify(offers.error);
+          return;
+        }
+        id = offers.data?.[0]?.id || null;
+      }
+      if (!id) {
+        notify('No donation offers are available for this account.');
+        return;
+      }
+      const result = await ngoApi.getOfferDetail(id);
+      if (result.error || !result.data) {
+        notify(result.error || 'Offer details could not be loaded.');
+        return;
+      }
+      setOffer(result.data);
+      setAcceptedQty(String(result.data.quantity_offered));
+      setReceivingSlot(result.data.pickup_window || '');
+    };
+    loadOffer();
+  }, [offerId, notify]);
 
   const handleAccept = async () => {
-    const qty = parseInt(acceptedQty) || 60;
-    await ngoApi.respondToOffer('RL-00128', 'accept', { accepted_meals: qty, delivery_window: receivingSlot, notes: note });
-    notify(`Accepted ${acceptedQty} meals from ABC Restaurant! Database record updated & courier dispatch triggered.`);
+    const qty = parseInt(acceptedQty, 10);
+    if (!offer || !Number.isInteger(qty) || qty < 1 || qty > offer.quantity_offered) {
+      notify('Enter a valid quantity not exceeding the offered allocation.');
+      return;
+    }
+    const result = await ngoApi.respondToOffer(offer.allocation_id, 'accept', { accepted_meals: qty, delivery_window: receivingSlot, notes: note });
+    if (result.error || !result.data) {
+      notify(result.error || 'Offer acceptance failed.');
+      return;
+    }
+    notify(`Accepted ${qty} meals from ${offer.donor}.`);
     setScreen('ngo-overview');
   };
 
   const handleDecline = async () => {
-    await ngoApi.respondToOffer('RL-00128', 'decline');
-    notify('Offer declined. The system has notified alternative shelters.');
+    if (!offer) return;
+    const result = await ngoApi.respondToOffer(offer.allocation_id, 'decline');
+    if (result.error || !result.data) {
+      notify(result.error || 'Offer decline failed.');
+      return;
+    }
+    notify('Offer declined.');
     setScreen('offers');
   };
+
+  const mapUrl = offer?.donor_address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(offer.donor_address)}`
+    : null;
 
   return (
     <>
       <PageHead 
-        eyebrow="NGO / OFFERS / RL-00128" 
+        eyebrow={`NGO / OFFERS / ${offer?.code || ''}`} 
         title="Review & Accept Food Donation" 
-        subtitle="ABC Restaurant · 80 Meals Offered · 98% Compatibility with your Cold Storage profile" 
+        subtitle={offer ? `${offer.donor} · ${offer.quantity_offered} meals offered` : 'Loading offer details…'} 
         onBack={() => setScreen('offers')}
         backLabel="Back to Offers"
         action={
           <div className="actions">
             <Button onClick={() => setScreen('offers')}>Back to Offers</Button>
-            <Button primary onClick={handleAccept}>Accept Allocation</Button>
+            <Button primary onClick={handleAccept} disabled={!offer || offer.current_status === 'ACCEPTED' || offer.current_status === 'DECLINED'}>Accept Allocation</Button>
           </div>
         }
       />
@@ -1949,17 +1928,17 @@ function OfferDetail({
         <div>
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
-              title="Surplus Vegetarian Lunch Meals" 
-              action={<Badge tone="amber">Awaiting Your Response</Badge>}
+              title={offer?.title || 'Donation Offer'} 
+              action={<Badge tone={offer?.current_status === 'ACCEPTED' ? 'green' : offer?.current_status === 'DECLINED' ? 'gray' : 'amber'}>{offer?.current_status?.replaceAll('_', ' ') || 'Loading'}</Badge>}
             />
             <p style={{ fontSize: 15, fontWeight: 600, color: '#1b6348' }}>
-              ABC Restaurant Group · 24, 2nd Avenue, Anna Nagar (1.8 km)
+              {offer?.donor || '—'} · {offer?.donor_address || 'Address unavailable'}
             </p>
             <div className="metric-row">
-              <b>TOTAL OFFERED<strong>80 Meals</strong><small>Packaged in trays</small></b>
-              <b>PREPARATION TIME<strong>1:00 PM</strong><small>2 hours ago</small></b>
-              <b>PICKUP WINDOW<strong>3:30 - 5:00 PM</strong><small>Today</small></b>
-              <b>TRANSIT DISTANCE<strong>1.8 km</strong><small>~8 min bike delivery</small></b>
+              <b>TOTAL OFFERED<strong>{offer?.quantity_offered ?? '—'} Meals</strong><small>{offer?.packaging || 'Packaging unspecified'}</small></b>
+              <b>PREPARATION TIME<strong>{offer?.prep_time || '—'}</strong></b>
+              <b>PICKUP WINDOW<strong>{offer?.pickup_window || '—'}</strong></b>
+              <b>TRANSIT DISTANCE<strong>{offer?.distance ? `${offer.distance} km` : '—'}</strong></b>
             </div>
           </Card>
 
@@ -1971,23 +1950,19 @@ function OfferDetail({
             <div className="detail-grid">
               <p>
                 <small>FOOD CATEGORY</small>
-                <b>Prepared Hot / Cooked Meals</b>
-                Freshly cooked mixed vegetable curry with steamed basmati rice.
+                <b>{offer?.food_category || 'Not specified'}</b>
               </p>
               <p>
                 <small>PACKAGING INTEGRITY</small>
-                <b>Individual Food-Grade Sealed Trays</b>
-                Tamper-evident seals intact.
+                <b>{offer?.packaging || 'Not specified'}</b>
               </p>
               <p>
                 <small>STORAGE PARAMETERS</small>
-                <b>Refrigerated Storage (3.5°C)</b>
-                Maintained in certified commercial cold storage.
+                <b>{offer?.storage_temp || 'Not specified'}</b>
               </p>
               <p>
                 <small>ALLERGEN DISCLOSURE</small>
-                <b>Contains Dairy · Vegetarian</b>
-                Zero tree nuts, peanuts, or shell allergen traces.
+                <b>{offer?.allergens || 'Not specified'}</b>
               </p>
             </div>
           </Card>
@@ -1995,13 +1970,12 @@ function OfferDetail({
           <Card>
             <SectionTitle 
               title="Pickup Kitchen Coordinates" 
-              action={<a onClick={() => notify('Opening GPS Map View')}>View on Map <ExternalLink size={12} /></a>}
+              action={mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer">View on Map <ExternalLink size={12} /></a> : undefined}
             />
             <div className="person-row">
               <MapPin size={22} color="#1b6348" />
               <div>
-                <b>24, 2nd Avenue, Anna Nagar Central</b>
-                <small>Contact: Chef Alex Rivera (+91 98765 43210) · Service Bay 2</small>
+                <b>{offer?.donor_address || 'Address unavailable'}</b>
               </div>
             </div>
           </Card>
@@ -2011,7 +1985,7 @@ function OfferDetail({
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
               title="Confirm Quantity to Receive" 
-              subtitle="Your remaining capacity today is 70 meals"
+              subtitle={`Maximum offered quantity: ${offer?.quantity_offered ?? '—'} meals`}
             />
             
             <div style={{ margin: '14px 0' }}>
@@ -2021,15 +1995,14 @@ function OfferDetail({
                   type="number" 
                   value={acceptedQty} 
                   onChange={(e) => setAcceptedQty(e.target.value)} 
-                  max="70"
+                  max={offer?.quantity_offered}
                   min="10"
                 />
               </label>
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <Button sm secondary onClick={() => setAcceptedQty('60')}>Accept 60 Meals</Button>
-              <Button sm secondary onClick={() => setAcceptedQty('70')}>Max Capacity (70)</Button>
+              <Button sm secondary onClick={() => setAcceptedQty(String(offer?.quantity_offered || ''))}>Accept Full Allocation</Button>
             </div>
 
             <Input 
@@ -2046,10 +2019,10 @@ function OfferDetail({
               />
             </label>
 
-            <Button primary className="full" onClick={handleAccept} style={{ marginBottom: 10 }}>
+            <Button primary className="full" onClick={handleAccept} style={{ marginBottom: 10 }} disabled={!offer || offer.current_status === 'ACCEPTED' || offer.current_status === 'DECLINED'}>
               <Check size={16} /> Confirm & Accept {acceptedQty} Meals
             </Button>
-            <Button danger className="full" onClick={handleDecline}>
+            <Button danger className="full" onClick={handleDecline} disabled={!offer || offer.current_status === 'ACCEPTED' || offer.current_status === 'DECLINED'}>
               Decline Offer (Pass to Next Shelter)
             </Button>
           </Card>
@@ -2264,36 +2237,38 @@ function Requirements({
 // ---------------- SCREEN 10: VOLUNTEER OVERVIEW ----------------
 function VolunteerOverview({ 
   setScreen, 
-  notify 
+  notify,
+  setTaskId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setTaskId: (id: string) => void;
 }) { 
   const [isAvailable, setIsAvailable] = useState(true);
   const [stats, setStats] = useState<any>(null);
+  const [activeTasks, setActiveTasks] = useState<any[]>([]);
 
   useEffect(() => {
     volunteerApi.getDashboardStats().then(res => {
       if (res.data) {
         setStats(res.data);
-        if (res.data.is_online !== undefined) setIsAvailable(res.data.is_online);
-      } else if (res.error && (res.error.includes('403') || res.error.includes('Forbidden'))) {
-        authApi.demoLogin('volunteer').then(() => {
-          volunteerApi.getDashboardStats().then(retryRes => {
-            if (retryRes.data) {
-              setStats(retryRes.data);
-              if (retryRes.data.is_online !== undefined) setIsAvailable(retryRes.data.is_online);
-            }
-          });
-        });
-      }
+        if (res.data.is_available !== undefined) setIsAvailable(res.data.is_available);
+      } else if (res.error) notify(res.error);
     });
-  }, []);
+    volunteerApi.getActiveTasks().then(res => {
+      if (res.data) setActiveTasks(res.data);
+      else if (res.error) notify(res.error);
+    });
+  }, [notify]);
 
   const toggleAvailability = async () => {
     const nextVal = !isAvailable;
-    setIsAvailable(nextVal);
-    await volunteerApi.toggleAvailability(nextVal);
+    const result = await volunteerApi.toggleAvailability(nextVal);
+    if (result.error || !result.data) {
+      notify(result.error || 'Availability could not be updated.');
+      return;
+    }
+    setIsAvailable(result.data.is_available);
     notify(nextVal ? 'Status set to: ONLINE (Ready for pickups)' : 'Status set to: OFFLINE');
   };
 
@@ -2301,8 +2276,8 @@ function VolunteerOverview({
     <>
       <PageHead 
         eyebrow="VOLUNTEER RESCUE COURIER / OVERVIEW" 
-        title="Welcome back, Jordan" 
-        subtitle="Two-wheeler Fleet #M-104 · Insulated Carrier Box verified at 40 meals max." 
+        title="Volunteer workspace" 
+        subtitle={stats?.vehicle_type || 'Manage your assigned rescue missions and availability.'} 
         action={
           <div className="actions">
             <Button 
@@ -2312,7 +2287,14 @@ function VolunteerOverview({
               <span className={`dot-indicator ${isAvailable ? 'donor' : 'volunteer'}`} style={{ display: 'inline-block' }} />
               {isAvailable ? 'Online & Accepting Tasks' : 'Status: Offline'}
             </Button>
-            <Button primary onClick={() => setScreen('task')}>
+            <Button primary onClick={() => {
+              if (!activeTasks[0]) {
+                notify('No active missions are assigned to this account.');
+                return;
+              }
+              setTaskId(activeTasks[0].id);
+              setScreen('task');
+            }}>
               <Navigation size={16} /> Open Active Mission Route
             </Button>
           </div>
@@ -2322,26 +2304,26 @@ function VolunteerOverview({
       <div className="stats-grid">
         <Stat 
           label="Missions Completed" 
-          value="27" 
-          note="100% on-time delivery score" 
+          value={stats?.tasks_completed ?? '—'} 
+          note="Completed missions" 
           icon={<CheckCircle2 size={18} />} 
         />
         <Stat 
           label="Meals Transported" 
-          value="1,120" 
-          note="Across 18 neighborhood kitchens" 
+          value={stats?.meals_delivered ?? '—'} 
+          note="Meals delivered" 
           icon={<Package size={18} />} 
         />
         <Stat 
           label="Active Assigned Tasks" 
-          value="2" 
-          note="1 in progress, 1 scheduled at 5 PM" 
+          value={stats?.upcoming_tasks ?? '—'} 
+          note="Assigned missions" 
           icon={<Clock3 size={18} />} 
         />
         <Stat 
           label="Courier Rating" 
-          value="4.98 ★" 
-          note="Certified Safe Food Handler" 
+          value={stats?.rating ? `${stats.rating} ★` : '—'} 
+          note="Volunteer rating" 
           icon={<ShieldCheck size={18} />} 
         />
       </div>
@@ -2350,47 +2332,28 @@ function VolunteerOverview({
         <Card>
           <SectionTitle 
             title="Current Assigned Rescue Tasks" 
-            action={<Badge tone="green">Active Mission</Badge>}
+            action={<Badge tone="green">{activeTasks.length} active</Badge>}
           />
 
-          <div className="task-card">
+          {activeTasks.map((task) => <div className="task-card" key={task.id}>
             <div className="between">
-              <Badge tone="amber">In Progress · Pickup Underway</Badge>
-              <b style={{ color: '#1b6348' }}>ETA Pickup: 3:30 PM</b>
+              <Badge tone={task.status === 'IN_TRANSIT' ? 'amber' : 'blue'}>{task.status.replaceAll('_', ' ')}</Badge>
+              <b style={{ color: '#1b6348' }}>Deadline: {task.deadline || '—'}</b>
             </div>
-            <h3>Mission RL-00124 · ABC Restaurant Group</h3>
-            <p>150 Vegetarian Lunch Boxes · Multi-drop route (Hope Kitchen, Care Centre, Meals for All)</p>
+            <h3>{task.title}</h3>
+            <p>{task.food_summary} · {task.stops}</p>
             <div className="metric-row">
-              <b>PICKUP TIME<strong>3:30 PM</strong><small>Anna Nagar</small></b>
-              <b>STOP 1<strong>Hope Kitchen</strong><small>60 meals</small></b>
-              <b>STOP 2 & 3<strong>Shelters 2 & 3</strong><small>90 meals</small></b>
-              <b>CARRIER<strong>Two-wheeler</strong><small>Insulated carrier</small></b>
+              <b>VOLUME<strong>{task.meals}</strong></b>
+              <b>STATUS<strong>{task.status.replaceAll('_', ' ')}</strong></b>
+              <b>DEADLINE<strong>{task.deadline || '—'}</strong></b>
             </div>
             <div style={{ marginTop: 14 }}>
-              <Button primary onClick={() => setScreen('task')}>
+              <Button primary onClick={() => { setTaskId(task.id); setScreen('task'); }}>
                 Open Mission Manifest & GPS Route <Navigation size={14} />
               </Button>
             </div>
-          </div>
-
-          <div className="task-card">
-            <div className="between">
-              <Badge tone="blue">Scheduled for 5:00 PM</Badge>
-              <b style={{ color: '#4b5853' }}>Starts in 1h 45m</b>
-            </div>
-            <h3>Mission RL-00131 · Fresh Bake House</h3>
-            <p>35 Bread & Bakery Bundles · Single destination drop to Anna Nagar Care Centre</p>
-            <div className="metric-row">
-              <b>PICKUP TIME<strong>5:00 - 6:00 PM</strong><small>Kilpauk</small></b>
-              <b>DELIVER TO<strong>Care Centre</strong><small>35 packs</small></b>
-              <b>DISTANCE<strong>3.2 km</strong><small>~12 min trip</small></b>
-            </div>
-            <div style={{ marginTop: 14 }}>
-              <Button sm onClick={() => setScreen('task')}>
-                View Mission Parameters
-              </Button>
-            </div>
-          </div>
+          </div>)}
+          {activeTasks.length === 0 && <p>No active missions are currently assigned.</p>}
         </Card>
 
         <div>
@@ -2405,19 +2368,19 @@ function VolunteerOverview({
             />
             <div className="between">
               <span>Vehicle Type:</span>
-              <b>Hero Electric Scooter (M-104)</b>
+              <b>{stats?.vehicle_type || 'Not specified'}</b>
             </div>
             <div className="between">
               <span>Insulated Box Capacity:</span>
-              <b>Up to 40 meal containers / run</b>
+              <b>{stats?.max_meal_capacity ? `Up to ${stats.max_meal_capacity} meals / run` : 'Not specified'}</b>
             </div>
             <div className="between">
               <span>Service Radius:</span>
-              <b>North Chennai (5 km radius)</b>
+              <b>Profile-based service radius</b>
             </div>
             <div className="between">
               <span>Clean Transport Cert:</span>
-              <b>Valid through Dec 2026</b>
+              <b>Not available</b>
             </div>
             <Button 
               className="full" 
@@ -2429,24 +2392,8 @@ function VolunteerOverview({
           </Card>
 
           <Card>
-            <SectionTitle 
-              title="New Mission Request Alert" 
-              action={<Badge tone="amber">1 Pending Offer</Badge>}
-            />
-            <h3>Mission RL-00135 · City Caterers</h3>
-            <p>20 Boxed Bakery Snacks · 2.1 km away in Aminjikarai</p>
-            <div className="between">
-              <span>Pickup Window:</span>
-              <b>6:00 - 7:00 PM Today</b>
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-              <Button onClick={() => notify('Mission declined. Assigned to nearest available runner.')}>
-                Decline
-              </Button>
-              <Button primary onClick={() => { notify('Mission RL-00135 accepted! Added to schedule.'); setScreen('task'); }}>
-                Accept Mission
-              </Button>
-            </div>
+            <SectionTitle title="Mission Requests" />
+            <p>New assignments will appear in your active mission list after dispatch.</p>
           </Card>
         </div>
       </div>
@@ -2457,60 +2404,130 @@ function VolunteerOverview({
 // ---------------- SCREEN 11: VOLUNTEER TASK DETAILS & ROUTE ----------------
 function Task({ 
   notify, 
-  setScreen 
+  setScreen,
+  taskId
 }: { 
   notify: (msg: string) => void; 
   setScreen?: (s: Screen) => void; 
+  taskId: string | null;
 }) { 
-  const [currentStep, setCurrentStep] = useState(2);
+  const [task, setTask] = useState<any>(null);
+  const [currentStep, setCurrentStep] = useState(1);
   const [inspections, setInspections] = useState({
-    carrier: true,
-    qty: true,
-    temp: true,
-    seal: true
+    carrier: false,
+    qty: false,
+    temp: false,
+    seal: false
   });
   const [otp, setOtp] = useState('');
+  const [verifiedQty, setVerifiedQty] = useState('');
+  const [receiverName, setReceiverName] = useState('');
+  const [tempChecked, setTempChecked] = useState('');
+  const [tempAtDrop, setTempAtDrop] = useState('');
+
+  useEffect(() => {
+    const loadTask = async () => {
+      let id = taskId;
+      if (!id) {
+        const active = await volunteerApi.getActiveTasks();
+        if (active.error) {
+          notify(active.error);
+          return;
+        }
+        id = active.data?.[0]?.id || null;
+      }
+      if (!id) {
+        notify('No active missions are assigned to this account.');
+        return;
+      }
+      const result = await volunteerApi.getTask(id);
+      if (result.error || !result.data) {
+        notify(result.error || 'Mission details could not be loaded.');
+        return;
+      }
+      setTask(result.data);
+      setCurrentStep(result.data.current_step);
+    };
+    loadTask();
+  }, [taskId, notify]);
+
+  const currentStop = task?.stops?.[task?.current_stop_index || 0];
+
+  useEffect(() => {
+    if (currentStop) {
+      setVerifiedQty(String(parseInt(currentStop.meals, 10) || ''));
+      setReceiverName(currentStop.receiver || '');
+    }
+  }, [currentStop]);
 
   const nextStep = async () => {
-    if (currentStep === 2) {
-      setCurrentStep(3);
-      await volunteerApi.updateTaskStep('RL-00124', 3);
-      notify('Step completed: Food picked up! In transit to Hope Community Kitchen.');
-    } else if (currentStep === 3) {
-      setCurrentStep(4);
-      await volunteerApi.updateTaskStep('RL-00124', 4);
-      notify('Arrived at Drop #1! Ready for digital handover verification.');
-    } else if (currentStep === 4) {
-      setCurrentStep(1);
-      await volunteerApi.verifyOtp('RL-00124', {
-        otp_code: otp || '4492',
-        verified_qty: 60,
-        temp_at_drop: 3.8,
-        receiver_name: 'Sarah Kumar'
+    if (!task || currentStep >= 5) return;
+    if (currentStep === 4) {
+      const quantity = parseInt(verifiedQty, 10);
+      const dropTemperature = Number.parseFloat(tempAtDrop);
+      if (!otp.trim() || !Number.isInteger(quantity) || quantity < 1 || !receiverName.trim() || !Number.isFinite(dropTemperature)) {
+        notify('Enter the recipient OTP, verified quantity, receiver name, and measured temperature.');
+        return;
+      }
+      const result = await volunteerApi.verifyOtp(task.code, {
+        otp_code: otp.trim(),
+        verified_qty: quantity,
+        temp_at_drop: dropTemperature,
+        receiver_name: receiverName.trim()
       });
-      notify('Handover confirmed with OTP 4492! Mission RL-00124 marked complete in database.');
-    } else {
-      setCurrentStep(2);
-      await volunteerApi.updateTaskStep('RL-00124', 2);
-      notify('Arrived at Donor Kitchen. Ready for food inspection.');
+      if (result.error || !result.data) {
+        notify(result.error || 'Handover could not be verified.');
+        return;
+      }
+      const refreshed = await volunteerApi.getTask(task.id);
+      if (refreshed.error || !refreshed.data) {
+        notify(refreshed.error || 'Handover was recorded, but mission refresh failed.');
+        return;
+      }
+      setTask(refreshed.data);
+      setCurrentStep(refreshed.data.current_step);
+      setOtp('');
+      notify(result.data.message || 'Recipient handover verified.');
+      return;
     }
+    if (currentStep === 2 && !Object.values(inspections).every(Boolean)) {
+      notify('Complete every transport safety inspection before departure.');
+      return;
+    }
+    if (currentStep === 2 && !Number.isFinite(Number.parseFloat(tempChecked))) {
+      notify('Record the measured food temperature before departure.');
+      return;
+    }
+    const next = currentStep === 1 ? 2 : currentStep === 2 ? 3 : 4;
+    const result = await volunteerApi.updateTaskStep(task.code, next, {
+      inspections_passed: Object.values(inspections).every(Boolean),
+      temp_checked: currentStep === 2 ? Number.parseFloat(tempChecked) : undefined
+    });
+    if (result.error || !result.data) {
+      notify(result.error || 'Mission step could not be updated.');
+      return;
+    }
+    setCurrentStep(next);
+    notify(result.data.message || 'Mission progress updated.');
   };
+
+  const currentAddress = currentStop?.address;
+  const mapUrl = task?.origin?.address && currentAddress
+    ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(task.origin.address)}&destination=${encodeURIComponent(currentAddress)}`
+    : null;
 
   return (
     <>
       <PageHead 
-        eyebrow="VOLUNTEER / MY TASKS / RL-00124" 
-        title="Active Mission Manifest: RL-00124" 
-        subtitle="Pickup at ABC Restaurant · 3 Drop-off Locations in Anna Nagar" 
+        eyebrow={`VOLUNTEER / MY TASKS / ${task?.code || ''}`} 
+        title={task ? `Mission Manifest: ${task.code}` : 'Mission Manifest'} 
+        subtitle={task ? `Pickup at ${task.origin?.name || 'donor'} · ${task.stops.length} recipient stops` : 'Loading assigned mission…'} 
         onBack={setScreen ? () => setScreen('volunteer-overview') : undefined}
         backLabel="Back to Volunteer Dashboard"
         action={
           <div className="actions">
-            <Button onClick={() => alert('Support dispatch notified. Operations will call in 60s.')}>
-              <Phone size={14} /> Contact Ops Central
-            </Button>
-            <Button primary onClick={nextStep}>
-              {currentStep === 2 ? 'Confirm Food Collection' : currentStep === 3 ? 'Arrived at Drop #1' : 'Verify Handover'}
+            <Button primary onClick={nextStep} disabled={!task || currentStep >= 5}>
+              {currentStep === 1 ? 'Arrived at Donor Kitchen' : currentStep === 2 ? 'Confirm Food Collection' : currentStep === 3 ? 'Arrived at Recipient' : currentStep === 4 ? 'Verify Handover' : 'Mission Complete'}
             </Button>
           </div>
         }
@@ -2522,42 +2539,42 @@ function Task({
             <SectionTitle 
               title="Collect & Deliver Surplus Food" 
               action={
-                <Badge tone={currentStep === 2 ? 'amber' : currentStep === 3 ? 'blue' : 'green'}>
-                  {currentStep === 1 ? 'Step 1: Heading to Kitchen' : currentStep === 2 ? 'Step 2: Inspect & Collect' : currentStep === 3 ? 'Step 3: In Transit' : 'Step 4: Recipient Handover'}
+                <Badge tone={currentStep === 2 ? 'amber' : currentStep === 3 ? 'blue' : currentStep >= 4 ? 'green' : 'gray'}>
+                  {currentStep >= 5 ? 'Mission Complete' : `Step ${currentStep} of 4`}
                 </Badge>
               }
             />
-            <p>Assigned Courier: Jordan Mathew · Mission ID: RL-00124</p>
+            <p>{task?.origin?.name || 'Donor'} · Mission ID: {task?.code || '—'}</p>
             <div className="metric-row">
-              <b>TOTAL BATCH<strong>150 Meals</strong><small>Split across 3 drops</small></b>
-              <b>DEADLINE<strong>5:00 PM</strong><small>Freshness constraint</small></b>
-              <b>TRANSPORT<strong>Two-wheeler</strong><small>Insulated thermal box</small></b>
-              <b>STATUS<strong>{currentStep === 2 ? 'At Kitchen' : 'In Transit'}</strong><small>GPS Active</small></b>
+              <b>TOTAL BATCH<strong>{task?.total_meals ?? '—'} Meals</strong><small>{task?.stops?.length || 0} stops</small></b>
+              <b>DEADLINE<strong>{task?.deadline || '—'}</strong></b>
+              <b>TRANSPORT<strong>{task?.transport || '—'}</strong><small>{task?.carrier_volume || ''}</small></b>
+              <b>STATUS<strong>{task?.status?.replaceAll('_', ' ') || 'Loading'}</strong></b>
             </div>
           </Card>
 
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
               title="Turn-by-Turn Delivery Route" 
-              action={<a onClick={() => notify('Launching Google Maps Navigation')}><Navigation size={14} /> Open GPS Navigation</a>}
+              action={mapUrl ? <a href={mapUrl} target="_blank" rel="noreferrer"><Navigation size={14} /> Open GPS Navigation</a> : undefined}
             />
             <div className="route-grid">
               <div>
                 <small>ORIGIN (PICKUP)</small>
-                <b>ABC Restaurant Group</b>
-                <p>24, 2nd Avenue, Anna Nagar<br />Chef Alex Rivera · +91 98765 43210</p>
+                <b>{task?.origin?.name || 'Donor'}</b>
+                <p>{task?.origin?.address || 'Address unavailable'}<br />{task?.origin?.contact || ''} {task?.origin?.phone || ''}</p>
               </div>
               <div>
-                <small>DROP-OFF #1</small>
-                <b>Hope Community Kitchen</b>
-                <p>18, 5th Street, Anna Nagar<br />Receiver: Sarah Kumar · +91 98402 44550</p>
+                <small>DROP-OFF #{(task?.current_stop_index || 0) + 1}</small>
+                <b>{currentStop?.name || 'Recipient'}</b>
+                <p>{currentStop?.address || 'Address unavailable'}<br />Receiver: {currentStop?.receiver || 'Not specified'} · {currentStop?.phone || ''}</p>
               </div>
             </div>
 
             <div className="metric-row">
-              <b>STOP 1 (1.8 km)<strong>60 meals</strong><small>Hope Community Kitchen</small></b>
-              <b>STOP 2 (1.2 km)<strong>50 meals</strong><small>Anna Nagar Care Centre</small></b>
-              <b>STOP 3 (1.5 km)<strong>40 meals</strong><small>Meals for All Foundation</small></b>
+              {(task?.stops || []).map((stop: any, index: number) => (
+                <b key={`${stop.stop_number}-${stop.name}`}>STOP {stop.stop_number}<strong>{stop.meals}</strong><small>{stop.name}{index === task.current_stop_index ? ' · Current' : ''}</small></b>
+              ))}
             </div>
           </Card>
 
@@ -2578,7 +2595,7 @@ function Task({
                   checked={inspections.qty} 
                   onChange={(e) => setInspections({ ...inspections, qty: e.target.checked })} 
                 />
-                <span>Count verified with donor chef: Exactly 150 sealed trays</span>
+                <span>Quantity verified with donor representative</span>
               </label>
               <label className="custom-checkbox">
                 <input 
@@ -2586,7 +2603,7 @@ function Task({
                   checked={inspections.temp} 
                   onChange={(e) => setInspections({ ...inspections, temp: e.target.checked })} 
                 />
-                <span>Infrared food surface thermometer reads ≤ 4.2°C</span>
+                <span>Food temperature recorded within safe handling limits</span>
               </label>
               <label className="custom-checkbox">
                 <input 
@@ -2597,6 +2614,7 @@ function Task({
                 <span>Tamper seals inspected on each outer crate</span>
               </label>
             </div>
+            <Input label="Measured temperature at pickup (°C)" type="number" value={tempChecked} onChange={(e) => setTempChecked(e.target.value)} />
           </Card>
         </div>
 
@@ -2604,14 +2622,14 @@ function Task({
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
               title="Mission Action Progression" 
-              action={<Badge tone="blue">Step {currentStep} of 4</Badge>}
+              action={<Badge tone="blue">{currentStep >= 5 ? 'Completed' : `Step ${currentStep} of 4`}</Badge>}
             />
             <Timeline 
               items={[
-                { title: 'Courier Accepted Assignment', time: 'Today, 2:21 PM' },
-                { title: 'Arrived at Donor Kitchen', time: 'Today, 2:38 PM', active: currentStep === 2 },
-                { title: 'Food Inspected & Loaded in Carrier', time: currentStep >= 3 ? 'Completed' : 'Pending', active: currentStep === 3 },
-                { title: 'Recipient Handover & OTP Verification', time: currentStep === 4 ? 'Awaiting Code' : 'Scheduled' }
+                { title: 'Mission assigned', time: currentStep > 1 ? 'Completed' : 'Pending', active: currentStep === 1 },
+                { title: 'Pickup inspection and collection', time: currentStep > 2 ? 'Completed' : currentStep === 2 ? 'In progress' : 'Pending', active: currentStep === 2 },
+                { title: 'Transit to recipient', time: currentStep > 3 ? 'Completed' : currentStep === 3 ? 'In progress' : 'Pending', active: currentStep === 3 },
+                { title: `Handover at ${currentStop?.name || 'recipient'}`, time: currentStep === 4 ? 'Awaiting code' : currentStep > 4 ? 'Completed' : 'Pending', active: currentStep === 4 }
               ]}
             />
 
@@ -2621,21 +2639,16 @@ function Task({
                   label="Enter Recipient OTP Code" 
                   value={otp} 
                   onChange={(e) => setOtp(e.target.value)} 
-                  placeholder="e.g. 4492" 
+                  placeholder="Code provided by recipient" 
                 />
+                <Input label="Verified quantity (meals)" type="number" value={verifiedQty} onChange={(e) => setVerifiedQty(e.target.value)} />
+                <Input label="Receiver name" value={receiverName} onChange={(e) => setReceiverName(e.target.value)} />
+                <Input label="Measured temperature at handover (°C)" type="number" value={tempAtDrop} onChange={(e) => setTempAtDrop(e.target.value)} />
               </div>
             )}
 
-            <Button primary className="full" style={{ marginTop: 16 }} onClick={nextStep}>
-              {currentStep === 2 ? 'Confirm Food Collection & Start Route' : currentStep === 3 ? 'Arrived at Drop #1 (Hope Kitchen)' : 'Verify Recipient Handover'}
-            </Button>
-            <Button 
-              danger 
-              className="full" 
-              style={{ marginTop: 8 }}
-              onClick={() => alert('Issue reported to dispatch desk. Operations will handle discrepancy.')}
-            >
-              Report Incident / Delay / Discrepancy
+            <Button primary className="full" style={{ marginTop: 16 }} onClick={nextStep} disabled={!task || currentStep >= 5}>
+              {currentStep === 1 ? 'Confirm Arrival at Donor' : currentStep === 2 ? 'Confirm Food Collection & Start Route' : currentStep === 3 ? `Arrived at ${currentStop?.name || 'Recipient'}` : currentStep === 4 ? 'Verify Recipient Handover' : 'Mission Complete'}
             </Button>
           </Card>
 
@@ -2643,19 +2656,19 @@ function Task({
             <SectionTitle title="Food Handling Requirements" />
             <div className="between">
               <span>Food Type:</span>
-              <b>Vegetarian meals</b>
+              <b>{task?.title || '—'}</b>
             </div>
             <div className="between">
               <span>Packaging:</span>
-              <b>Sealed trays</b>
+              <b>{task?.stops ? `${task.stops.length} recipient stop(s)` : '—'}</b>
             </div>
             <div className="between">
               <span>Storage at pickup:</span>
-              <b>Chilled 3.5°C</b>
+              <b>{task?.origin?.address || '—'}</b>
             </div>
             <div className="between">
               <span>Allergen Notice:</span>
-              <b>Contains dairy</b>
+              <b>{currentStop?.address || '—'}</b>
             </div>
           </Card>
         </div>
@@ -2667,22 +2680,36 @@ function Task({
 // ---------------- SCREEN 12: OPERATIONS CONSOLE (NETWORK & DISPATCH) ----------------
 function OpsOverview({ 
   setScreen, 
-  notify 
+  notify,
+  setMissionId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setMissionId: (id: string) => void;
 }) { 
   const [stats, setStats] = useState<any>(null);
   const [missionsList, setMissionsList] = useState<any[]>([]);
+  const [telemetry, setTelemetry] = useState<any[]>([]);
+  const [exceptions, setExceptions] = useState<any[]>([]);
 
   useEffect(() => {
     opsApi.getNetworkStats().then(res => {
       if (res.data) setStats(res.data);
+      else if (res.error) notify(res.error);
     });
     opsApi.getMissions().then(res => {
-      if (res.data && res.data.length > 0) setMissionsList(res.data);
+      if (res.data) setMissionsList(res.data);
+      else if (res.error) notify(res.error);
     });
-  }, []);
+    opsApi.getTelemetryNodes().then(res => {
+      if (res.data) setTelemetry(res.data);
+      else if (res.error) notify(res.error);
+    });
+    opsApi.getExceptions().then(res => {
+      if (res.data) setExceptions(res.data);
+      else if (res.error) notify(res.error);
+    });
+  }, [notify]);
 
   return (
     <>
@@ -2705,26 +2732,26 @@ function OpsOverview({
       <div className="stats-grid">
         <Stat 
           label="Active Rescue Missions" 
-          value={stats ? `${stats.active_missions}` : "12"} 
-          note="4 requiring active supervision" 
+          value={stats ? `${stats.active_missions}` : "—"} 
+          note={`${stats?.open_exceptions ?? 0} open exceptions`} 
           icon={<Truck size={18} />} 
         />
         <Stat 
           label="Surplus Awaiting Pickup" 
-          value={stats ? `${stats.surplus_awaiting_pickup}` : "240"} 
-          note="Across 5 donor kitchens" 
+          value={stats ? `${stats.meals_awaiting_pickup}` : "—"} 
+          note="Meals awaiting pickup" 
           icon={<Package size={18} />} 
         />
         <Stat 
           label="Active Fleet Couriers" 
-          value={stats ? `${stats.active_fleet}` : "9"} 
-          note="8 on two-wheelers, 1 van" 
+          value={stats ? `${stats.active_fleet_couriers}` : "—"} 
+          note="Available fleet couriers" 
           icon={<Navigation size={18} />} 
         />
         <Stat 
           label="Delivered Today" 
-          value={stats ? `${stats.delivered_today?.toLocaleString()}` : "1,480"} 
-          note="99.2% on-time freshness rating" 
+          value={stats ? `${stats.completed_today}` : "—"} 
+          note={stats?.on_time_freshness_rate ? `${stats.on_time_freshness_rate} on-time freshness` : "Completed today"} 
           icon={<CheckCircle2 size={18} />} 
         />
       </div>
@@ -2742,47 +2769,19 @@ function OpsOverview({
           />
           <Table 
             headers={['MISSION & DONOR', 'STATUS', 'RECIPIENTS', 'COURIER', 'DEADLINE', 'ACTION']} 
-            rows={[
-              [
-                <div>
-                  <b>RL-00124</b>
-                  <small>ABC Restaurant · 150 meals</small>
-                </div>,
-                <Badge tone="amber">In Transit</Badge>,
-                '3 Shelters',
-                'Jordan Mathew',
-                '5:00 PM',
-                <Button sm primary onClick={() => setScreen('mission-detail')}>
-                  Inspect
-                </Button>
-              ],
-              [
-                <div>
-                  <b>RL-00128</b>
-                  <small>ABC Restaurant · 80 meals</small>
-                </div>,
-                <Badge tone="blue">Courier Assigned</Badge>,
-                '2 Shelters',
-                'Priya S.',
-                '5:00 PM',
-                <Button sm onClick={() => setScreen('mission-detail')}>
-                  Inspect
-                </Button>
-              ],
-              [
-                <div>
-                  <b>RL-00131</b>
-                  <small>Fresh Bake House · 35 packs</small>
-                </div>,
-                <Badge tone="red">Awaiting Courier</Badge>,
-                '1 Shelter',
-                'Unassigned (SOS)',
-                '6:00 PM',
-                <Button sm onClick={() => setScreen('mission-detail')}>
-                  Assign
-                </Button>
-              ]
-            ]}
+            rows={missionsList.slice(0, 8).map((item) => [
+              <div key={item.id}>
+                <b>{item.id}</b>
+                <small>{item.donor}</small>
+              </div>,
+              <Badge tone={item.tone}>{item.status}</Badge>,
+              item.stops,
+              item.courier,
+              item.deadline || '—',
+              <Button sm primary onClick={() => { setMissionId(item.uuid || item.id); setScreen('mission-detail'); }}>
+                Inspect
+              </Button>
+            ])}
           />
         </Card>
 
@@ -2852,24 +2851,24 @@ function OpsOverview({
         <Card>
           <SectionTitle 
             title="Operational Exceptions & Dispatch Alerts" 
-            action={<Badge tone="amber">3 require attention</Badge>}
+            action={<Badge tone={exceptions.filter(e => e.status === 'OPEN').length ? 'amber' : 'green'}>{exceptions.filter(e => e.status === 'OPEN').length} require attention</Badge>}
           />
           <Timeline 
-            items={[
-              { title: 'Mission RL-00131: Fresh Bake House surplus unassigned (45m left)', time: 'High Priority', active: true },
-              { title: 'Cold-chain probe alert: Hope Foundation storage sensor OK', time: '12m ago' },
-              { title: 'Traffic congestion near 2nd Avenue: Alternative route sent to Courier', time: '24m ago' }
-            ]}
+            items={exceptions.slice(0, 8).map((item) => ({
+              title: `${item.type}: ${item.description}`,
+              time: `${item.severity} · ${item.status}`,
+              active: item.status === 'OPEN'
+            }))}
           />
         </Card>
 
         <Card>
           <SectionTitle title="Autonomous Dispatch Metrics" />
           <div className="metric-row" style={{ borderTop: 'none', paddingTop: 0 }}>
-            <b>AUTO-MATCH RATE<strong>94.8%</strong><small>No manual edits</small></b>
-            <b>AVG DISPATCH<strong>2.4 min</strong><small>Submission to pickup</small></b>
-            <b>TEMP COMPLIANCE<strong>100%</strong><small>Zero spoilages</small></b>
-            <b>DAILY CO2 SAVED<strong>540 kg</strong><small>Diverted from landfill</small></b>
+            <b>AUTO-MATCH RATE<strong>{stats?.auto_match_rate || '—'}</strong></b>
+            <b>OPEN EXCEPTIONS<strong>{stats?.open_exceptions ?? '—'}</strong></b>
+            <b>TEMP COMPLIANCE<strong>{stats?.on_time_freshness_rate || '—'}</strong></b>
+            <b>COMPLETED TODAY<strong>{stats?.completed_today ?? '—'}</strong></b>
           </div>
           <Button primary className="full" style={{ marginTop: 16 }} onClick={() => setScreen('missions')}>
             Open Central Dispatch Pipeline
@@ -2883,77 +2882,26 @@ function OpsOverview({
 // ---------------- SCREEN 13: OPERATIONS MISSIONS QUEUE ----------------
 function Missions({ 
   setScreen, 
-  notify 
+  notify,
+  setMissionId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  setMissionId: (id: string) => void;
 }) { 
   const [activeTab, setActiveTab] = useState<'all' | 'transit' | 'unassigned' | 'completed'>('all');
   const [search, setSearch] = useState('');
-
-  const missions = [
-    {
-      id: 'RL-00124',
-      donor: 'ABC Restaurant · Anna Nagar',
-      quantity: '150 meals',
-      stops: '3 stops',
-      status: 'In transit',
-      tone: 'amber' as const,
-      courier: 'Jordan Mathew',
-      deadline: '5:00 PM'
-    },
-    {
-      id: 'RL-00128',
-      donor: 'ABC Restaurant · Anna Nagar',
-      quantity: '80 meals',
-      stops: '2 stops',
-      status: 'Pickup assigned',
-      tone: 'blue' as const,
-      courier: 'Priya S.',
-      deadline: '5:00 PM'
-    },
-    {
-      id: 'RL-00131',
-      donor: 'Fresh Bake House · Kilpauk',
-      quantity: '35 packs',
-      stops: '1 stop',
-      status: 'Needs volunteer',
-      tone: 'red' as const,
-      courier: 'Unassigned (High priority)',
-      deadline: '6:00 PM'
-    },
-    {
-      id: 'RL-00136',
-      donor: 'Green Plate Cafe · Shenoy Nagar',
-      quantity: '60 meals',
-      stops: '2 stops',
-      status: 'Needs review',
-      tone: 'purple' as const,
-      courier: 'AI Allocation Pending',
-      deadline: '6:30 PM'
-    },
-    {
-      id: 'RL-00119',
-      donor: 'ABC Restaurant · Anna Nagar',
-      quantity: '42 packs',
-      stops: '1 stop',
-      status: 'Delivered',
-      tone: 'green' as const,
-      courier: 'Rohan Verma',
-      deadline: 'Completed'
-    }
-  ];
-
-  const [missionsList, setMissionsList] = useState<any[]>(missions);
+  const [missionsList, setMissionsList] = useState<any[]>([]);
 
   useEffect(() => {
     opsApi.getMissions(activeTab, search).then(res => {
-      if (res.data && res.data.length > 0) setMissionsList(res.data);
+      if (res.data) setMissionsList(res.data);
+      else if (res.error) notify(res.error);
     });
-  }, [activeTab, search]);
+  }, [activeTab, search, notify]);
 
   const filtered = missionsList.filter((m) => {
-    const match = m.id.toLowerCase().includes(search.toLowerCase()) || m.donor.toLowerCase().includes(search.toLowerCase());
+    const match = String(m.id || '').toLowerCase().includes(search.toLowerCase()) || String(m.donor || '').toLowerCase().includes(search.toLowerCase());
     if (activeTab === 'transit') return match && m.status.includes('transit');
     if (activeTab === 'unassigned') return match && (m.status.includes('Needs') || m.status.includes('Unassigned'));
     if (activeTab === 'completed') return match && m.status.includes('Delivered');
@@ -2982,16 +2930,16 @@ function Missions({
         <div className="toolbar">
           <div className="tabs">
             <button className={activeTab === 'all' ? 'active' : ''} onClick={() => setActiveTab('all')}>
-              All Missions ({missions.length})
+              All Missions ({missionsList.length})
             </button>
             <button className={activeTab === 'transit' ? 'active' : ''} onClick={() => setActiveTab('transit')}>
-              In Transit (1)
+              In Transit ({missionsList.filter(m => m.status.includes('Transit')).length})
             </button>
             <button className={activeTab === 'unassigned' ? 'active' : ''} onClick={() => setActiveTab('unassigned')}>
-              Unassigned / Review (2)
+              Unassigned / Review ({missionsList.filter(m => m.status.includes('Unassigned') || m.status.includes('Dispatch')).length})
             </button>
             <button className={activeTab === 'completed' ? 'active' : ''} onClick={() => setActiveTab('completed')}>
-              Completed (1)
+              Completed ({missionsList.filter(m => m.status.includes('Completed')).length})
             </button>
           </div>
           <div className="actions">
@@ -3003,7 +2951,7 @@ function Missions({
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Button sm><Filter size={13} /> Filter</Button>
+            <Button sm onClick={() => setSearch('')}><Filter size={13} /> Clear Search</Button>
           </div>
         </div>
 
@@ -3019,7 +2967,7 @@ function Missions({
             <Badge key={`b-${item.id}`} tone={item.tone}>{item.status}</Badge>,
             item.courier,
             item.deadline,
-            <Button key={`btn-${item.id}`} sm primary onClick={() => setScreen('mission-detail')}>
+            <Button key={`btn-${item.id}`} sm primary onClick={() => { setMissionId(item.uuid || item.id); setScreen('mission-detail'); }}>
               Inspect Mission
             </Button>
           ])}
@@ -3032,24 +2980,63 @@ function Missions({
 // ---------------- SCREEN 14: OPERATIONS MISSION DETAIL ----------------
 function MissionDetail({ 
   setScreen, 
-  notify 
+  notify,
+  missionId
 }: { 
   setScreen: (s: Screen) => void; 
   notify: (msg: string) => void;
+  missionId: string | null;
 }) { 
   const [missionData, setMissionData] = useState<any>(null);
 
   useEffect(() => {
-    opsApi.getMissionDetail('RL-00124').then(res => {
-      if (res.data) setMissionData(res.data);
-    });
-  }, []); 
+    const load = async () => {
+      let id = missionId;
+      if (!id) {
+        const missions = await opsApi.getMissions();
+        if (missions.error) {
+          notify(missions.error);
+          return;
+        }
+        id = missions.data?.[0]?.uuid || missions.data?.[0]?.id || null;
+      }
+      if (!id) {
+        notify('No mission records are available.');
+        return;
+      }
+      const result = await opsApi.getMissionDetail(id);
+      if (result.error || !result.data) {
+        notify(result.error || 'Mission details could not be loaded.');
+        return;
+      }
+      setMissionData(result.data);
+    };
+    load();
+  }, [missionId, notify]);
+
+  const reassign = async () => {
+    if (!missionData) return;
+    const result = await opsApi.reassignMission(missionData.code);
+    if (result.error) notify(result.error);
+    else notify(result.data?.message || 'Mission reassignment completed.');
+  };
+
+  const abortMission = async () => {
+    if (!missionData) return;
+    if (!confirm('Are you sure you want to abort this rescue mission?')) return;
+    const result = await opsApi.abortMission(missionData.code);
+    if (result.error) notify(result.error);
+    else {
+      notify('Mission cancelled.');
+      setScreen('missions');
+    }
+  };
   return (
     <>
       <PageHead 
-        eyebrow="OPERATIONS / MISSIONS / RL-00124" 
-        title="Mission Inspection: RL-00124" 
-        subtitle="150 Cooked Meals · ABC Restaurant to 3 Community Kitchens · Courier: Jordan Mathew" 
+        eyebrow={`OPERATIONS / MISSIONS / ${missionData?.code || ''}`} 
+        title={`Mission Inspection: ${missionData?.code || '—'}`} 
+        subtitle={missionData ? `${missionData.total_meals} meals · ${missionData.total_stops} recipient stops · ${missionData.courier?.name || 'Courier unassigned'}` : 'Loading mission record…'} 
         onBack={() => setScreen('missions')}
         backLabel="Back to Missions Queue"
         action={
@@ -3057,9 +3044,7 @@ function MissionDetail({
             <Button onClick={() => notify('Emergency notification sent to all participants.')}>
               Broadcast Alert
             </Button>
-            <Button primary onClick={() => setScreen('task')}>
-              View Courier Manifest
-            </Button>
+            <Button primary onClick={() => setScreen('missions')}>Back to Mission Queue</Button>
           </div>
         }
       />
@@ -3068,15 +3053,15 @@ function MissionDetail({
         <div>
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
-              title="ABC Restaurant – Surplus Vegetarian Meals" 
-              action={<Badge tone="amber">Active · In Transit</Badge>}
+              title={missionData?.title || 'Surplus Donation'} 
+              action={<Badge tone={missionData?.status === 'COMPLETED' ? 'green' : 'amber'}>{missionData?.status?.replaceAll('_', ' ') || 'Loading'}</Badge>}
             />
-            <p>Created Today at 2:14 PM · Origin: 24, 2nd Avenue, Anna Nagar</p>
+            <p>Created at {missionData?.created_at || '—'}</p>
             <div className="metric-row">
-              <b>TOTAL OFFERED<strong>150</strong><small>Meals</small></b>
-              <b>ALLOCATED<strong>150</strong><small>100% matched</small></b>
-              <b>RECIPIENTS<strong>3 Shelters</strong><small>All accepted</small></b>
-              <b>COURIER FLEET<strong>1 Unit</strong><small>Two-wheeler</small></b>
+              <b>TOTAL OFFERED<strong>{missionData?.total_meals ?? '—'}</strong><small>Meals</small></b>
+              <b>RECIPIENTS<strong>{missionData?.total_stops ?? '—'}</strong><small>Shelter stops</small></b>
+              <b>COURIER FLEET<strong>{missionData?.courier?.name ? '1 Unit' : 'Unassigned'}</strong><small>{missionData?.courier?.vehicle || '—'}</small></b>
+              <b>STATUS<strong>{missionData?.status?.replaceAll('_', ' ') || '—'}</strong></b>
             </div>
           </Card>
 
@@ -3088,38 +3073,16 @@ function MissionDetail({
             />
             <Table 
               headers={['RECIPIENT SHELTER', 'REQUESTED', 'ALLOCATED', 'STATUS', 'ARRIVAL']} 
-              rows={[
-                [
-                  <div>
-                    <b>Hope Community Kitchen</b>
-                    <small>18, 5th Street, Anna Nagar</small>
-                  </div>,
-                  '60 meals',
-                  '60 meals',
-                  <Badge tone="green">Confirmed</Badge>,
-                  '3:45 PM'
-                ],
-                [
-                  <div>
-                    <b>Anna Nagar Care Centre</b>
-                    <small>12, 11th Main Road</small>
-                  </div>,
-                  '50 meals',
-                  '50 meals',
-                  <Badge tone="green">Confirmed</Badge>,
-                  '4:15 PM'
-                ],
-                [
-                  <div>
-                    <b>Meals for All Foundation</b>
-                    <small>45, Round Table Ave</small>
-                  </div>,
-                  '40 meals',
-                  '40 meals',
-                  <Badge tone="green">Confirmed</Badge>,
-                  '4:40 PM'
-                ]
-              ]}
+              rows={(missionData?.allocations || []).map((allocation: any) => [
+                <div>
+                  <b>{allocation.recipient || 'Recipient'}</b>
+                  <small>{allocation.address || 'Address unavailable'}</small>
+                </div>,
+                `${allocation.requested || '—'} meals`,
+                allocation.allocated || '—',
+                <Badge tone={allocation.status === 'DELIVERED' ? 'green' : allocation.status === 'DECLINED' ? 'gray' : 'amber'}>{allocation.status}</Badge>,
+                allocation.arrival || '—'
+              ])}
             />
           </Card>
 
@@ -3129,12 +3092,11 @@ function MissionDetail({
               action={<Badge tone="purple"><Sparkles size={12} /> AI Trace Log</Badge>}
             />
             <Timeline 
-              items={[
-                { title: 'Intake Agent: Verified ABC Restaurant sanitization certificate & 3.5°C cold chain.', time: '2:14 PM' },
-                { title: 'Matching Engine: Ranked 6 shelters; allocated to 3 highest need facilities under 3 km.', time: '2:18 PM' },
-                { title: 'Dispatch Agent: Assigned Courier Jordan Mathew based on proximity & 40-meal carrier volume.', time: '2:21 PM', active: true },
-                { title: 'Recovery Monitor: Live tracking heartbeat confirmed normal trajectory.', time: '2:38 PM' }
-              ]}
+              items={(missionData?.agent_runs || []).map((run: any) => ({
+                title: run.title,
+                time: run.time,
+                active: run.agent === 'dispatch'
+              }))}
             />
           </Card>
         </div>
@@ -3143,13 +3105,13 @@ function MissionDetail({
           <Card style={{ marginBottom: 20 }}>
             <SectionTitle 
               title="Assigned Courier Telematics" 
-              action={<Badge tone="blue">En Route</Badge>}
+              action={<Badge tone="blue">{missionData?.status?.replaceAll('_', ' ') || 'Not assigned'}</Badge>}
             />
             <div className="person-row">
-              <span className="avatar">JM</span>
+              <span className="avatar">{missionData?.courier?.name ? missionData.courier.name.split(' ').map((part: string) => part[0]).join('').slice(0, 2) : '—'}</span>
               <div>
-                <b>Jordan Mathew</b>
-                <small>Courier ID #JM-902 · Hero Electric Scooter</small>
+                <b>{missionData?.courier?.name || 'Unassigned'}</b>
+                <small>{missionData?.courier?.vehicle || 'No volunteer assigned'}</small>
               </div>
             </div>
             <div className="between" style={{ marginTop: 14 }}>
@@ -3162,26 +3124,17 @@ function MissionDetail({
             </div>
             <div className="between">
               <span>Vehicle Battery:</span>
-              <b>84% · GPS Telemetry Active</b>
+              <b>{missionData?.courier?.phone || 'Not available'}</b>
             </div>
-            <Button primary className="full" style={{ marginTop: 14 }} onClick={() => setScreen('task')}>
-              View Courier Viewpoint <ExternalLink size={14} />
-            </Button>
           </Card>
 
           <Card>
             <SectionTitle title="Operational Interventions" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <Button className="full" onClick={() => notify('Recalculating split allocations across backup shelters...')}>
-                Recalculate Allocation
-              </Button>
-              <Button className="full" onClick={() => notify('Reassignment prompt sent to nearest standby courier.')}>
+              <Button className="full" onClick={reassign}>
                 Reassign Volunteer Courier
               </Button>
-              <Button className="full" onClick={() => notify('Direct telephone bridge established with Alex (Donor) and Sarah (NGO).')}>
-                Contact Participants
-              </Button>
-              <Button danger className="full" onClick={() => { if (confirm('Are you sure you want to abort this rescue mission?')) { notify('Mission cancelled.'); setScreen('missions'); } }}>
+              <Button danger className="full" onClick={abortMission}>
                 Cancel Mission (Emergency Abort)
               </Button>
             </div>
@@ -3196,11 +3149,15 @@ function MissionDetail({
 export default function RescueLoopApp() {
   const [screen, setScreen] = useState<Screen>('login');
   const [role, setRole] = useState<Role>('donor');
+  const [donationId, setDonationId] = useState<string | null>(null);
+  const [offerId, setOfferId] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [missionId, setMissionId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const notify = (msg: string) => {
+  const notify = React.useCallback((msg: string) => {
     setToastMessage(msg);
-  };
+  }, []);
 
   useEffect(() => {
     if (!toastMessage) return;
@@ -3208,14 +3165,13 @@ export default function RescueLoopApp() {
     return () => clearTimeout(timer);
   }, [toastMessage]);
 
-  useEffect(() => {
-    // Authenticate default role so initial API requests succeed
-    authApi.demoLogin('donor').catch(() => {});
-  }, []);
-
   const setRoleAndHome = async (r: Role, skipDemo?: boolean) => {
     if (!skipDemo) {
-      await authApi.demoLogin(r).catch(() => {});
+      const result = await authApi.demoLogin(r);
+      if (result.error) {
+        notify(result.error);
+        return;
+      }
     }
     setRole(r);
     setScreen(`${r}-overview`);
@@ -3226,35 +3182,35 @@ export default function RescueLoopApp() {
   const content = useMemo(() => {
     switch (screen) {
       case 'donor-overview':
-        return <DonorOverview setScreen={setScreen} notify={notify} />;
+        return <DonorOverview setScreen={setScreen} notify={notify} setDonationId={setDonationId} />;
       case 'create-donation':
-        return <DonationForm setScreen={setScreen} notify={notify} />;
+        return <DonationForm setScreen={setScreen} notify={notify} setDonationId={setDonationId} />;
       case 'donation-details':
-        return <DonationDetails setScreen={setScreen} notify={notify} />;
+        return <DonationDetails setScreen={setScreen} notify={notify} donationId={donationId} setTaskId={setTaskId} />;
       case 'history':
-        return <History role={role} setScreen={setScreen} notify={notify} />;
+        return <History role={role} setScreen={setScreen} notify={notify} setDonationId={setDonationId} setOfferId={setOfferId} setTaskId={setTaskId} setMissionId={setMissionId} />;
       case 'ngo-overview':
         return <NgoOverview setScreen={setScreen} notify={notify} />;
       case 'offers':
-        return <Offers setScreen={setScreen} notify={notify} />;
+        return <Offers setScreen={setScreen} notify={notify} setOfferId={setOfferId} />;
       case 'offer-detail':
-        return <OfferDetail setScreen={setScreen} notify={notify} />;
+        return <OfferDetail setScreen={setScreen} notify={notify} offerId={offerId} />;
       case 'requirements':
         return <Requirements setScreen={setScreen} notify={notify} />;
       case 'volunteer-overview':
-        return <VolunteerOverview setScreen={setScreen} notify={notify} />;
+        return <VolunteerOverview setScreen={setScreen} notify={notify} setTaskId={setTaskId} />;
       case 'task':
-        return <Task setScreen={setScreen} notify={notify} />;
+        return <Task setScreen={setScreen} notify={notify} taskId={taskId} />;
       case 'ops-overview':
-        return <OpsOverview setScreen={setScreen} notify={notify} />;
+        return <OpsOverview setScreen={setScreen} notify={notify} setMissionId={setMissionId} />;
       case 'missions':
-        return <Missions setScreen={setScreen} notify={notify} />;
+        return <Missions setScreen={setScreen} notify={notify} setMissionId={setMissionId} />;
       case 'mission-detail':
-        return <MissionDetail setScreen={setScreen} notify={notify} />;
+        return <MissionDetail setScreen={setScreen} notify={notify} missionId={missionId} />;
       default:
-        return <DonorOverview setScreen={setScreen} notify={notify} />;
+        return <DonorOverview setScreen={setScreen} notify={notify} setDonationId={setDonationId} />;
     }
-  }, [screen, role]);
+  }, [screen, role, donationId, offerId, taskId, missionId]);
 
   return (
     <>
@@ -3331,23 +3287,23 @@ export default function RescueLoopApp() {
             <optgroup label="🏢 Donor Screens">
               <option value="donor-overview">Donor Overview</option>
               <option value="create-donation">➕ Create Donation Form</option>
-              <option value="donation-details">📋 Batch RL-00124 Details</option>
+              <option value="donation-details">📋 Donation Details</option>
               <option value="history">📑 Donation History & Tax Receipts</option>
             </optgroup>
             <optgroup label="🤝 NGO Screens">
               <option value="ngo-overview">NGO Overview</option>
               <option value="offers">📦 Incoming Offers</option>
-              <option value="offer-detail">🔍 Review & Accept Offer (RL-00128)</option>
+              <option value="offer-detail">🔍 Review & Accept Offer</option>
               <option value="requirements">⚙️ Intake Capacity & Preferences</option>
             </optgroup>
             <optgroup label="🛵 Volunteer Screens">
               <option value="volunteer-overview">Volunteer Dashboard</option>
-              <option value="task">🗺️ Active Mission & Route (RL-00124)</option>
+              <option value="task">🗺️ Active Mission & Route</option>
             </optgroup>
             <optgroup label="🛰️ Operations Screens">
               <option value="ops-overview">Operations Network Telemetry</option>
               <option value="missions">📊 Central Mission Control Queue</option>
-              <option value="mission-detail">🔬 Mission Details & Audit (RL-00124)</option>
+              <option value="mission-detail">🔬 Mission Details & Audit</option>
             </optgroup>
           </select>
         </div>

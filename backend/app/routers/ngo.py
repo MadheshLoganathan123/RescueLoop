@@ -25,10 +25,8 @@ async def get_ngo_dashboard_stats(
 ):
     ngo_prof = current_user.ngo_profile
     if not ngo_prof:
-        res = await db.execute(select(NgoProfile).limit(1))
-        ngo_prof = res.scalars().first()
-
-    ngo_id = ngo_prof.id if ngo_prof else "none"
+        raise HTTPException(status_code=404, detail="NGO profile not found")
+    ngo_id = ngo_prof.id
 
     # Pending offers count
     res_pending = await db.execute(
@@ -37,7 +35,7 @@ async def get_ngo_dashboard_stats(
             DonationAllocation.status.in_([AllocationStatusEnum.PROPOSED.value, AllocationStatusEnum.AWAITING_RESPONSE.value])
         )
     )
-    pending_offers = res_pending.scalar() or 2
+    pending_offers = res_pending.scalar() or 0
 
     # Accepted meals count
     res_accepted = await db.execute(
@@ -46,16 +44,23 @@ async def get_ngo_dashboard_stats(
             DonationAllocation.status == AllocationStatusEnum.ACCEPTED.value
         )
     )
-    meals_accepted = res_accepted.scalar() or 420
+    meals_accepted = res_accepted.scalar() or 0
+    res_received = await db.execute(
+        select(func.sum(DonationAllocation.accepted_meals)).where(
+            DonationAllocation.ngo_id == ngo_id,
+            DonationAllocation.status == AllocationStatusEnum.DELIVERED.value,
+        )
+    )
+    meals_received = res_received.scalar() or 0
 
     return {
         "incoming_offers": pending_offers,
         "meals_accepted_week": meals_accepted,
-        "received_today": 110,
-        "available_capacity": ngo_prof.current_free_capacity if ngo_prof else 70,
-        "daily_capacity": ngo_prof.daily_capacity_meals if ngo_prof else 180,
-        "organization_name": ngo_prof.organization_name if ngo_prof else "Hope Community Kitchen",
-        "contact_person": ngo_prof.contact_person if ngo_prof else "Sarah Kumar"
+        "received_today": meals_received,
+        "available_capacity": ngo_prof.current_free_capacity,
+        "daily_capacity": ngo_prof.daily_capacity_meals,
+        "organization_name": ngo_prof.organization_name,
+        "contact_person": ngo_prof.contact_person
     }
 
 @router.get("/capacity")
@@ -65,21 +70,19 @@ async def get_ngo_capacity(
 ):
     ngo_prof = current_user.ngo_profile
     if not ngo_prof:
-        res = await db.execute(select(NgoProfile).limit(1))
-        ngo_prof = res.scalars().first()
-
-    daily = ngo_prof.daily_capacity_meals if ngo_prof else 180
-    free = ngo_prof.current_free_capacity if ngo_prof else 70
+        raise HTTPException(status_code=404, detail="NGO profile not found")
+    daily = ngo_prof.daily_capacity_meals
+    free = ngo_prof.current_free_capacity
     allocated = max(0, daily - free)
-    pct = round((allocated / daily) * 100) if daily > 0 else 61
+    pct = round((allocated / daily) * 100) if daily > 0 else 0
 
     return {
         "daily_capacity": daily,
         "allocated_meals": allocated,
         "free_capacity": free,
         "percentage": pct,
-        "operating_hours": f"{ngo_prof.operating_hours_start} – {ngo_prof.operating_hours_end}" if ngo_prof else "9:00 AM – 6:00 PM",
-        "cold_storage": "Chilled 4°C (Active & Healthy)" if (ngo_prof and ngo_prof.has_refrigerated) else "Ambient only"
+        "operating_hours": f"{ngo_prof.operating_hours_start} – {ngo_prof.operating_hours_end}",
+        "cold_storage": "Chilled storage available" if ngo_prof.has_refrigerated else "Ambient storage only"
     }
 
 @router.get("/offers")
@@ -91,17 +94,15 @@ async def get_incoming_offers(
 ):
     ngo_prof = current_user.ngo_profile
     if not ngo_prof:
-        res = await db.execute(select(NgoProfile).limit(1))
-        ngo_prof = res.scalars().first()
-
-    ngo_id = ngo_prof.id if ngo_prof else None
+        raise HTTPException(status_code=404, detail="NGO profile not found")
+    ngo_id = ngo_prof.id
 
     query = select(DonationAllocation).options(
         selectinload(DonationAllocation.donation)
+        .selectinload(Donation.donor)
     ).order_by(DonationAllocation.created_at.desc())
 
-    if ngo_id:
-        query = query.where(DonationAllocation.ngo_id == ngo_id)
+    query = query.where(DonationAllocation.ngo_id == ngo_id)
 
     result = await db.execute(query)
     allocations = result.scalars().all()
@@ -138,8 +139,8 @@ async def get_incoming_offers(
             "id": a.id,
             "donation_id": d.id,
             "code": d.code,
-            "donor": "ABC Restaurant Group",
-            "location": "Anna Nagar · 1.8 km",
+            "donor": d.donor.organization_name if d.donor else "Donor",
+            "location": d.pickup_address,
             "food": d.title,
             "quantity": f"{a.allocated_meals} meals",
             "allocated_meals": a.allocated_meals,
@@ -158,25 +159,21 @@ async def get_offer_details(
     query = select(DonationAllocation).options(
         selectinload(DonationAllocation.donation).selectinload(Donation.donor)
     ).where(DonationAllocation.id == allocation_id)
+    ngo_prof = current_user.ngo_profile
+    if current_user.role == "ngo":
+        if not ngo_prof:
+            raise HTTPException(status_code=404, detail="NGO profile not found")
+        query = query.where(DonationAllocation.ngo_id == ngo_prof.id)
 
     result = await db.execute(query)
     alloc = result.scalars().first()
-
-    if not alloc:
-        # Fallback to first allocation
-        res_fb = await db.execute(
-            select(DonationAllocation).options(
-                selectinload(DonationAllocation.donation).selectinload(Donation.donor)
-            ).limit(1)
-        )
-        alloc = res_fb.scalars().first()
 
     if not alloc or not alloc.donation:
         raise HTTPException(status_code=404, detail="Offer allocation not found")
 
     d = alloc.donation
-    donor_org = d.donor.organization_name if d.donor else "ABC Restaurant Group"
-    donor_addr = d.donor.address if d.donor else "24, 2nd Avenue, Anna Nagar, Chennai"
+    donor_org = d.donor.organization_name if d.donor else None
+    donor_addr = d.pickup_address
 
     return {
         "allocation_id": alloc.id,
@@ -185,7 +182,7 @@ async def get_offer_details(
         "title": d.title,
         "donor": donor_org,
         "donor_address": donor_addr,
-        "distance": "1.8 km (approx 8 min transit)",
+        "distance": None,
         "quantity_offered": alloc.allocated_meals,
         "prep_time": d.prep_time.strftime("%I:%M %p"),
         "pickup_window": d.latest_pickup_time.strftime("%I:%M %p"),
@@ -214,14 +211,26 @@ async def respond_to_offer(
         raise HTTPException(status_code=404, detail="Offer allocation not found")
 
     ngo_prof = current_user.ngo_profile
-    if not ngo_prof:
-        res_ngo = await db.execute(select(NgoProfile).limit(1))
-        ngo_prof = res_ngo.scalars().first()
+    if not ngo_prof or alloc.ngo_id != ngo_prof.id:
+        raise HTTPException(status_code=404, detail="Offer allocation not found")
 
     if action == "accept":
+        if alloc.status == AllocationStatusEnum.ACCEPTED.value:
+            return {
+                "message": f"Accepted {alloc.accepted_meals} meals successfully.",
+                "allocation_id": alloc.id,
+                "status": alloc.status,
+            }
+        if alloc.status == AllocationStatusEnum.DECLINED.value:
+            raise HTTPException(status_code=409, detail="A declined offer cannot be accepted")
+        if alloc.status not in (
+            AllocationStatusEnum.PROPOSED.value,
+            AllocationStatusEnum.AWAITING_RESPONSE.value,
+        ):
+            raise HTTPException(status_code=409, detail="Offer has already been answered")
         accepted_qty = req.accepted_meals if req else alloc.allocated_meals
-        if accepted_qty > alloc.allocated_meals:
-            raise HTTPException(status_code=400, detail="Cannot accept more meals than allocated")
+        if accepted_qty <= 0 or accepted_qty > alloc.allocated_meals:
+            raise HTTPException(status_code=400, detail="Accepted meals must be between 1 and the offered quantity")
         
         alloc.accepted_meals = accepted_qty
         alloc.status = AllocationStatusEnum.ACCEPTED.value
@@ -237,9 +246,21 @@ async def respond_to_offer(
 
         msg = f"Accepted {accepted_qty} meals successfully."
     else:
+        if alloc.status == AllocationStatusEnum.DECLINED.value:
+            return {
+                "message": "Offer already declined.",
+                "allocation_id": alloc.id,
+                "status": alloc.status,
+            }
+        if alloc.status == AllocationStatusEnum.ACCEPTED.value:
+            raise HTTPException(status_code=409, detail="An accepted offer cannot be declined")
+        if alloc.status not in (
+            AllocationStatusEnum.PROPOSED.value,
+            AllocationStatusEnum.AWAITING_RESPONSE.value,
+        ):
+            raise HTTPException(status_code=409, detail="Offer has already been answered")
         alloc.status = AllocationStatusEnum.DECLINED.value
-        if ngo_prof:
-            ngo_prof.current_free_capacity += alloc.allocated_meals
+        ngo_prof.current_free_capacity += alloc.allocated_meals
         msg = "Offer declined. Operations dispatcher has been alerted to reroute."
 
     await log_audit_event(
@@ -261,9 +282,6 @@ async def get_ngo_preferences(
 ):
     ngo_prof = current_user.ngo_profile
     if not ngo_prof:
-        res = await db.execute(select(NgoProfile).limit(1))
-        ngo_prof = res.scalars().first()
-    if not ngo_prof:
         raise HTTPException(status_code=404, detail="NGO profile not found")
     return ngo_prof
 
@@ -274,9 +292,6 @@ async def update_ngo_preferences(
     db: AsyncSession = Depends(get_db)
 ):
     ngo_prof = current_user.ngo_profile
-    if not ngo_prof:
-        res = await db.execute(select(NgoProfile).limit(1))
-        ngo_prof = res.scalars().first()
     if not ngo_prof:
         raise HTTPException(status_code=404, detail="NGO profile not found")
 
@@ -295,3 +310,31 @@ async def update_ngo_preferences(
     await db.commit()
     await db.refresh(ngo_prof)
     return ngo_prof
+
+@router.get("/history")
+async def get_ngo_history(
+    current_user: User = Depends(require_role(["ngo"])),
+    db: AsyncSession = Depends(get_db),
+):
+    ngo_prof = current_user.ngo_profile
+    if not ngo_prof:
+        raise HTTPException(status_code=404, detail="NGO profile not found")
+    result = await db.execute(
+        select(DonationAllocation)
+        .options(selectinload(DonationAllocation.donation))
+        .where(DonationAllocation.ngo_id == ngo_prof.id)
+        .order_by(DonationAllocation.updated_at.desc())
+    )
+    return [
+        {
+            "id": allocation.donation.code if allocation.donation else allocation.id,
+            "uuid": allocation.id,
+            "name": allocation.donation.title if allocation.donation else "Donation",
+            "food": allocation.donation.food_category if allocation.donation else "Food donation",
+            "quantity": f"{allocation.accepted_meals or allocation.allocated_meals} meals",
+            "status": allocation.status.replace("_", " ").title(),
+            "tone": "green" if allocation.status == AllocationStatusEnum.DELIVERED.value else "amber",
+            "date": allocation.updated_at.strftime("%d %b %Y"),
+        }
+        for allocation in result.scalars().all()
+    ]

@@ -150,7 +150,7 @@ export const donorApi = {
   },
 
   async getActiveDonations() {
-    return request<any[]>('/donor/donations/active');
+    return request<any[]>('/donor/active-donations');
   },
 
   async createDonation(payload: any) {
@@ -165,7 +165,7 @@ export const donorApi = {
   },
 
   async getHistory() {
-    return request<any[]>('/donor/donations/history');
+    return request<any[]>('/donor/history');
   },
 
   async getTodayPickups() {
@@ -238,10 +238,14 @@ export const volunteerApi = {
     return request<any>(`/volunteer/tasks/${taskId}`);
   },
 
-  async updateTaskStep(taskId: string, step: number) {
+  async getActiveTasks() {
+    return request<any[]>('/volunteer/tasks/active');
+  },
+
+  async updateTaskStep(taskId: string, step: number, details?: { inspections_passed?: boolean; temp_checked?: number }) {
     return request<any>(`/volunteer/tasks/${taskId}/step`, {
       method: 'POST',
-      body: JSON.stringify({ step })
+      body: JSON.stringify({ step, ...details })
     });
   },
 
@@ -264,7 +268,7 @@ export const opsApi = {
   },
 
   async getTelemetryNodes() {
-    return request<any[]>('/ops/telemetry/nodes');
+    return request<any[]>('/ops/telemetry/map');
   },
 
   async getMissions(status = 'all', query = '') {
@@ -289,6 +293,14 @@ export const opsApi = {
     });
   },
 
+  async reassignMission(id: string) {
+    return request<any>(`/ops/missions/${id}/reassign`, { method: 'POST' });
+  },
+
+  async abortMission(id: string) {
+    return request<any>(`/ops/missions/${id}/abort`, { method: 'POST' });
+  },
+
   async getAuditLogs(limit = 20) {
     return request<any[]>(`/ops/audit-trail?limit=${limit}`);
   }
@@ -297,9 +309,9 @@ export const opsApi = {
 // ==================== AI COPILOT API ====================
 export const aiApi = {
   async intakeCopilot(notes: string) {
-    return request<any>('/ai/intake-copilot', {
+    return request<any>('/ai/intake-extract', {
       method: 'POST',
-      body: JSON.stringify({ notes })
+      body: JSON.stringify({ prompt: notes })
     });
   },
 
