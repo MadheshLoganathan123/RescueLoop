@@ -10,6 +10,7 @@ class Token(BaseModel):
     user_id: str
     full_name: str
     organization_name: Optional[str] = None
+    user: Optional[Dict[str, Any]] = None
 
 class TokenPayload(BaseModel):
     sub: str
@@ -35,10 +36,12 @@ class UserOut(BaseModel):
     email: str
     full_name: str
     role: str
-    phone: Optional[str]
+    phone: Optional[str] = None
     is_active: bool
     created_at: datetime
     organization_name: Optional[str] = None
+    access_token: Optional[str] = None
+    token_type: Optional[str] = "bearer"
 
     class Config:
         from_attributes = True

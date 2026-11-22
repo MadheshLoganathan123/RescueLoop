@@ -48,24 +48,44 @@ async function request<T>(
 
 // ==================== AUTH API ====================
 export const authApi = {
-  async login(formData: FormData) {
+  async login(credentials: { email?: string; username?: string; password?: string } | FormData) {
     try {
+      let body: any;
+      let headers: Record<string, string> = {};
+      if (typeof FormData !== 'undefined' && credentials instanceof FormData) {
+        body = credentials;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        const creds = credentials as { email?: string; username?: string; password?: string };
+        body = JSON.stringify({
+          email: creds.email || creds.username,
+          password: creds.password
+        });
+      }
+
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
-        body: formData
+        headers,
+        body
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: 'Login failed' }));
-        return { data: null, error: err.detail || 'Login failed' };
+        const err = await res.json().catch(() => ({ detail: 'Incorrect email or password' }));
+        return { data: null, error: err.detail || 'Incorrect email or password' };
       }
       const data = await res.json();
       if (typeof window !== 'undefined' && data.access_token) {
         localStorage.setItem('rescueloop_token', data.access_token);
-        localStorage.setItem('rescueloop_user', JSON.stringify(data.user));
+        const userObj = data.user || {
+          id: data.user_id,
+          role: data.role,
+          full_name: data.full_name,
+          organization_name: data.organization_name
+        };
+        localStorage.setItem('rescueloop_user', JSON.stringify(userObj));
       }
       return { data, error: null };
     } catch (err: any) {
-      return { data: null, error: err.message };
+      return { data: null, error: err.message || 'Login request failed' };
     }
   },
 
@@ -73,16 +93,42 @@ export const authApi = {
     const res = await request<any>(`/auth/demo-login/${role}`, { method: 'POST' });
     if (res.data?.access_token && typeof window !== 'undefined') {
       localStorage.setItem('rescueloop_token', res.data.access_token);
-      localStorage.setItem('rescueloop_user', JSON.stringify(res.data.user));
+      const userObj = res.data.user || {
+        id: res.data.user_id,
+        role: res.data.role,
+        full_name: res.data.full_name,
+        organization_name: res.data.organization_name
+      };
+      localStorage.setItem('rescueloop_user', JSON.stringify(userObj));
     }
     return res;
   },
 
-  async register(body: any) {
-    return request<any>('/auth/register', {
+  async register(body: {
+    email: string;
+    password: string;
+    full_name: string;
+    role: string;
+    phone?: string;
+    organization_name?: string;
+    address?: string;
+    vehicle_type?: string;
+  }) {
+    const res = await request<any>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(body)
     });
+    if (res.data?.access_token && typeof window !== 'undefined') {
+      localStorage.setItem('rescueloop_token', res.data.access_token);
+      const userObj = res.data.user || {
+        id: res.data.id,
+        role: res.data.role,
+        full_name: res.data.full_name,
+        organization_name: res.data.organization_name
+      };
+      localStorage.setItem('rescueloop_user', JSON.stringify(userObj));
+    }
+    return res;
   },
 
   async getMe() {

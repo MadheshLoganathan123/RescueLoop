@@ -1,20 +1,31 @@
 import logging
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy.pool import NullPool
 from sqlalchemy import event
 from backend.app.config import settings
 
 logger = logging.getLogger("rescueloop.database")
 
-# Handle SQLite foreign keys pragma when SQLite is used
-engine_kwargs = {"echo": False}
-if "sqlite" in settings.DATABASE_URL:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+is_sqlite = "sqlite" in settings.DATABASE_URL
+
+if is_sqlite:
+    engine_kwargs = {
+        "echo": False,
+        "connect_args": {"check_same_thread": False}
+    }
+else:
+    # High-efficiency PostgreSQL pool configuration:
+    # NullPool ensures clean connection lifecycle per request/session,
+    # preventing cross-event-loop socket corruption and stale cloud socket disconnects.
+    engine_kwargs = {
+        "echo": False,
+        "poolclass": NullPool,
+    }
 
 engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
 
-if "sqlite" in settings.DATABASE_URL:
-    from sqlalchemy.pool import StaticPool
+if is_sqlite:
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()

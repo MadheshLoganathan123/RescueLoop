@@ -199,7 +199,7 @@ async def get_offer_details(
 @router.post("/offers/{allocation_id}/respond")
 async def respond_to_offer(
     allocation_id: str,
-    action: str = Query(..., regex="^(accept|decline)$"),
+    action: str = Query(..., pattern="^(accept|decline)$"),
     req: Optional[OfferResponseRequest] = None,
     current_user: User = Depends(require_role(["ngo"])),
     db: AsyncSession = Depends(get_db)

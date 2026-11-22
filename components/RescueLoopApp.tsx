@@ -385,6 +385,18 @@ function Header({
         >
           Portal Landing
         </button>
+        <button 
+          type="button"
+          className="btn btn-sm" 
+          onClick={() => {
+            authApi.logout();
+            setScreen('login');
+          }}
+          style={{ fontSize: 12, padding: '5px 10px', color: '#dc2626', borderColor: '#fca5a5' }}
+          title="Sign out of workspace"
+        >
+          Sign Out
+        </button>
         <div 
           className="user" 
           onClick={() => {
@@ -410,27 +422,98 @@ function Login({
   setRoleAndHome 
 }: { 
   onLogin: () => void; 
-  setRoleAndHome: (r: Role) => void;
+  setRoleAndHome: (r: Role, skipDemo?: boolean) => void;
 }) {
+  const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin');
+
+  // Sign in state
   const [email, setEmail] = useState('alex@abcrestaurant.com');
   const [password, setPassword] = useState('••••••••••••');
   const [remember, setRemember] = useState(true);
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Registration / Onboarding state
+  const [regRole, setRegRole] = useState<'donor' | 'ngo' | 'volunteer'>('donor');
+  const [regFullName, setRegFullName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regPhone, setRegPhone] = useState('+91 98765 43210');
+  const [regOrgName, setRegOrgName] = useState('');
+  const [regAddress, setRegAddress] = useState('Anna Nagar, Chennai');
+  const [regVehicleType, setRegVehicleType] = useState('Two-wheeler');
+  const [regError, setRegError] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const handleCustomLogin = async () => {
-    const fd = new FormData();
-    fd.append('username', email);
-    fd.append('password', password === '••••••••••••' ? 'password123' : password);
-    const res = await authApi.login(fd);
-    if (res.data?.user?.role) {
-      setRoleAndHome(res.data.user.role as Role);
-    } else {
-      onLogin();
+    setLoginError('');
+    setIsLoggingIn(true);
+    try {
+      const pwd = password === '••••••••••••' ? 'password123' : password;
+      const res = await authApi.login({ email, password: pwd });
+      if (res.error) {
+        setLoginError(res.error);
+        setIsLoggingIn(false);
+        return;
+      }
+      const targetRole = (res.data?.user?.role || res.data?.role || 'donor') as Role;
+      setRoleAndHome(targetRole, true);
+    } catch (err: any) {
+      setLoginError(err.message || 'Login failed');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    setRegError('');
+    if (!regFullName.trim()) {
+      setRegError('Full Name is required');
+      return;
+    }
+    if (!regEmail.trim()) {
+      setRegError('Work Email Address is required');
+      return;
+    }
+    if (!regPassword.trim() || regPassword.length < 6) {
+      setRegError('Password must be at least 6 characters');
+      return;
+    }
+
+    setIsRegistering(true);
+    try {
+      const payload: any = {
+        role: regRole,
+        full_name: regFullName.trim(),
+        email: regEmail.trim(),
+        password: regPassword,
+        phone: regPhone.trim(),
+        organization_name: regOrgName.trim() || (regRole === 'volunteer' ? 'Independent Courier' : `${regFullName}'s Organization`),
+        address: regAddress.trim(),
+      };
+      if (regRole === 'volunteer') {
+        payload.vehicle_type = regVehicleType;
+      }
+
+      const res = await authApi.register(payload);
+      if (res.error) {
+        setRegError(res.error);
+        setIsRegistering(false);
+        return;
+      }
+
+      const targetRole = regRole as Role;
+      setRoleAndHome(targetRole, true);
+    } catch (err: any) {
+      setRegError(err.message || 'Registration failed');
+    } finally {
+      setIsRegistering(false);
     }
   };
 
   const handleDemoLogin = async (r: Role) => {
     await authApi.demoLogin(r);
-    setRoleAndHome(r);
+    setRoleAndHome(r, true);
   };
 
   return (
@@ -445,7 +528,8 @@ function Login({
           <a onClick={() => handleDemoLogin('ngo')}>NGO Receiver</a>
           <a onClick={() => handleDemoLogin('volunteer')}>Volunteer App</a>
           <a onClick={() => handleDemoLogin('ops')}>Operations Console</a>
-          <Button primary sm onClick={handleCustomLogin}>Sign in</Button>
+          <Button primary sm onClick={() => setAuthMode('signin')}>Sign In</Button>
+          <Button secondary sm onClick={() => setAuthMode('register')}>Create Account</Button>
         </div>
       </div>
       <div className="login-main">
@@ -464,58 +548,266 @@ function Login({
 
         <div className="login-card-container">
           <Card className="login-card">
-            <small className="eyebrow">PORTAL AUTHENTICATION</small>
-            <h2>Sign in to RescueLoop</h2>
-            <p>Access your organization workspace to post surplus, coordinate receivers, or dispatch rescue missions.</p>
+            {/* Auth Tab Navigation */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, borderBottom: '1px solid #e2e8f0', paddingBottom: 8 }}>
+              <button 
+                type="button" 
+                onClick={() => { setAuthMode('signin'); setLoginError(''); }}
+                style={{
+                  padding: '8px 14px',
+                  fontWeight: authMode === 'signin' ? 700 : 500,
+                  color: authMode === 'signin' ? '#1b6348' : '#64748b',
+                  borderBottom: authMode === 'signin' ? '2px solid #1b6348' : '2px solid transparent',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+              >
+                Sign In
+              </button>
+              <button 
+                type="button" 
+                onClick={() => { setAuthMode('register'); setRegError(''); }}
+                style={{
+                  padding: '8px 14px',
+                  fontWeight: authMode === 'register' ? 700 : 500,
+                  color: authMode === 'register' ? '#1b6348' : '#64748b',
+                  borderBottom: authMode === 'register' ? '2px solid #1b6348' : '2px solid transparent',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+              >
+                Create Account (Onboarding)
+              </button>
+            </div>
 
-            <Input 
-              label="Work Email Address" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. director@kitchen.org"
-            />
-            <label className="field" style={{ marginTop: 12 }}>
-              <span>Security Password</span>
-              <input 
-                type="password" 
-                value={password} 
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </label>
+            {authMode === 'signin' ? (
+              <>
+                <small className="eyebrow">PORTAL AUTHENTICATION</small>
+                <h2>Sign in to RescueLoop</h2>
+                <p>Access your organization workspace to post surplus, coordinate receivers, or dispatch rescue missions.</p>
 
-            <div className="between" style={{ marginTop: 14, marginBottom: 18 }}>
-              <label className="custom-checkbox">
-                <input 
-                  type="checkbox" 
-                  checked={remember} 
-                  onChange={(e) => setRemember(e.target.checked)} 
+                {loginError && (
+                  <div style={{ padding: '8px 12px', background: '#fee2e2', border: '1px solid #f87171', borderRadius: 6, color: '#991b1b', fontSize: 13, marginBottom: 12 }}>
+                    ⚠️ {loginError}
+                  </div>
+                )}
+
+                <Input 
+                  label="Work Email Address" 
+                  value={email} 
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="e.g. director@kitchen.org"
                 />
-                <span>Remember this terminal</span>
-              </label>
-              <a onClick={() => alert('Password reset link sent to demo registered email.')}>Forgot password?</a>
-            </div>
+                <label className="field" style={{ marginTop: 12 }}>
+                  <span>Security Password</span>
+                  <input 
+                    type="password" 
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </label>
 
-            <Button primary onClick={handleCustomLogin} className="full">
-              Enter Workspace <ArrowRight size={16} />
-            </Button>
+                <div className="between" style={{ marginTop: 14, marginBottom: 18 }}>
+                  <label className="custom-checkbox">
+                    <input 
+                      type="checkbox" 
+                      checked={remember} 
+                      onChange={(e) => setRemember(e.target.checked)} 
+                    />
+                    <span>Remember this terminal</span>
+                  </label>
+                  <a onClick={() => alert('Password reset link sent to demo registered email.')} style={{ cursor: 'pointer' }}>Forgot password?</a>
+                </div>
 
-            <div className="demo-account-pills">
-              <p>QUICK 1-CLICK DEMO LOGIN (SELECT ROLE):</p>
-              <div className="demo-role-buttons">
-                <button className="demo-role-btn" onClick={() => handleDemoLogin('donor')}>
-                  <Package size={14} color="#1b6348" /> Donor (Kitchen)
-                </button>
-                <button className="demo-role-btn" onClick={() => handleDemoLogin('ngo')}>
-                  <Heart size={14} color="#1d4ed8" /> NGO (Shelter)
-                </button>
-                <button className="demo-role-btn" onClick={() => handleDemoLogin('volunteer')}>
-                  <Truck size={14} color="#b45309" /> Volunteer Courier
-                </button>
-                <button className="demo-role-btn" onClick={() => handleDemoLogin('ops')}>
-                  <ShieldCheck size={14} color="#6d28d9" /> Operations Dispatch
-                </button>
-              </div>
-            </div>
+                <Button primary onClick={handleCustomLogin} disabled={isLoggingIn} className="full">
+                  {isLoggingIn ? 'Verifying Credentials...' : 'Enter Workspace'} <ArrowRight size={16} />
+                </Button>
+
+                <div style={{ marginTop: 14, textAlign: 'center', fontSize: 13, color: '#64748b' }}>
+                  Need to register your organization?{' '}
+                  <a onClick={() => { setAuthMode('register'); setRegError(''); }} style={{ color: '#1b6348', fontWeight: 600, cursor: 'pointer' }}>
+                    Create Account
+                  </a>
+                </div>
+
+                <div className="demo-account-pills">
+                  <p>QUICK 1-CLICK DEMO LOGIN (SELECT ROLE):</p>
+                  <div className="demo-role-buttons">
+                    <button className="demo-role-btn" onClick={() => handleDemoLogin('donor')}>
+                      <Package size={14} color="#1b6348" /> Donor (Kitchen)
+                    </button>
+                    <button className="demo-role-btn" onClick={() => handleDemoLogin('ngo')}>
+                      <Heart size={14} color="#1d4ed8" /> NGO (Shelter)
+                    </button>
+                    <button className="demo-role-btn" onClick={() => handleDemoLogin('volunteer')}>
+                      <Truck size={14} color="#b45309" /> Volunteer Courier
+                    </button>
+                    <button className="demo-role-btn" onClick={() => handleDemoLogin('ops')}>
+                      <ShieldCheck size={14} color="#6d28d9" /> Operations Dispatch
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <small className="eyebrow">ORGANIZATION ONBOARDING</small>
+                <h2>Join RescueLoop Network</h2>
+                <p>Register your commercial kitchen, NGO relief centre, or join as a certified logistics courier.</p>
+
+                {regError && (
+                  <div style={{ padding: '8px 12px', background: '#fee2e2', border: '1px solid #f87171', borderRadius: 6, color: '#991b1b', fontSize: 13, marginBottom: 12 }}>
+                    ⚠️ {regError}
+                  </div>
+                )}
+
+                {/* Role Selector Tabs */}
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6, color: '#334155' }}>
+                    Choose Participation Role
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    <button 
+                      type="button"
+                      onClick={() => setRegRole('donor')}
+                      style={{
+                        padding: '8px 4px',
+                        borderRadius: 6,
+                        border: regRole === 'donor' ? '2px solid #1b6348' : '1px solid #cbd5e1',
+                        background: regRole === 'donor' ? '#f0fdf4' : '#fff',
+                        fontWeight: regRole === 'donor' ? 700 : 500,
+                        color: regRole === 'donor' ? '#1b6348' : '#475569',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        textAlign: 'center'
+                      }}
+                    >
+                      <Package size={14} style={{ display: 'block', margin: '0 auto 4px' }} />
+                      Donor (Kitchen)
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setRegRole('ngo')}
+                      style={{
+                        padding: '8px 4px',
+                        borderRadius: 6,
+                        border: regRole === 'ngo' ? '2px solid #1d4ed8' : '1px solid #cbd5e1',
+                        background: regRole === 'ngo' ? '#eff6ff' : '#fff',
+                        fontWeight: regRole === 'ngo' ? 700 : 500,
+                        color: regRole === 'ngo' ? '#1d4ed8' : '#475569',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        textAlign: 'center'
+                      }}
+                    >
+                      <Heart size={14} style={{ display: 'block', margin: '0 auto 4px' }} />
+                      NGO (Shelter)
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setRegRole('volunteer')}
+                      style={{
+                        padding: '8px 4px',
+                        borderRadius: 6,
+                        border: regRole === 'volunteer' ? '2px solid #b45309' : '1px solid #cbd5e1',
+                        background: regRole === 'volunteer' ? '#fffbeb' : '#fff',
+                        fontWeight: regRole === 'volunteer' ? 700 : 500,
+                        color: regRole === 'volunteer' ? '#b45309' : '#475569',
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        textAlign: 'center'
+                      }}
+                    >
+                      <Truck size={14} style={{ display: 'block', margin: '0 auto 4px' }} />
+                      Volunteer Courier
+                    </button>
+                  </div>
+                </div>
+
+                <Input 
+                  label="Contact Person / Full Name *" 
+                  value={regFullName} 
+                  onChange={(e) => setRegFullName(e.target.value)}
+                  placeholder="e.g. Chef Priya Sharma"
+                />
+
+                <div style={{ marginTop: 10 }}>
+                  <Input 
+                    label="Work Email Address *" 
+                    value={regEmail} 
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder="e.g. contact@kitchen.org"
+                  />
+                </div>
+
+                <label className="field" style={{ marginTop: 10 }}>
+                  <span>Account Password (min. 6 characters) *</span>
+                  <input 
+                    type="password" 
+                    value={regPassword} 
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                  />
+                </label>
+
+                <div style={{ marginTop: 10 }}>
+                  <Input 
+                    label="Mobile Phone Number" 
+                    value={regPhone} 
+                    onChange={(e) => setRegPhone(e.target.value)}
+                    placeholder="+91 98765 43210"
+                  />
+                </div>
+
+                {regRole !== 'volunteer' ? (
+                  <div style={{ marginTop: 10 }}>
+                    <Input 
+                      label="Organization / Kitchen Name *" 
+                      value={regOrgName} 
+                      onChange={(e) => setRegOrgName(e.target.value)}
+                      placeholder={regRole === 'donor' ? 'e.g. Royal Palace Banquet Hall' : 'e.g. Hope Shelter Home'}
+                    />
+                  </div>
+                ) : (
+                  <label className="field" style={{ marginTop: 10 }}>
+                    <span>Vehicle & Transport Mode</span>
+                    <select 
+                      value={regVehicleType} 
+                      onChange={(e) => setRegVehicleType(e.target.value)}
+                      style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #cbd5e1' }}
+                    >
+                      <option value="Two-wheeler">Two-wheeler (Scooter / Bike)</option>
+                      <option value="Four-wheeler / Car">Four-wheeler / Passenger Car</option>
+                      <option value="Refrigerated Van">Refrigerated Logistics Van</option>
+                      <option value="Bicycle">Eco Bicycle Courier</option>
+                    </select>
+                  </label>
+                )}
+
+                <div style={{ marginTop: 10, marginBottom: 16 }}>
+                  <Input 
+                    label="Operating Address / City Zone" 
+                    value={regAddress} 
+                    onChange={(e) => setRegAddress(e.target.value)}
+                    placeholder="e.g. 24, 2nd Avenue, Anna Nagar, Chennai"
+                  />
+                </div>
+
+                <Button primary onClick={handleRegister} disabled={isRegistering} className="full">
+                  {isRegistering ? 'Registering Account...' : 'Complete Registration & Enter Workspace'} <ArrowRight size={16} />
+                </Button>
+
+                <div style={{ marginTop: 14, textAlign: 'center', fontSize: 13, color: '#64748b' }}>
+                  Already registered?{' '}
+                  <a onClick={() => { setAuthMode('signin'); setLoginError(''); }} style={{ color: '#1b6348', fontWeight: 600, cursor: 'pointer' }}>
+                    Sign In
+                  </a>
+                </div>
+              </>
+            )}
           </Card>
         </div>
       </div>
@@ -2912,11 +3204,13 @@ export default function RescueLoopApp() {
     authApi.demoLogin('donor').catch(() => {});
   }, []);
 
-  const setRoleAndHome = (r: Role) => {
+  const setRoleAndHome = (r: Role, skipDemo?: boolean) => {
     setRole(r);
     setScreen(`${r}-overview`);
-    authApi.demoLogin(r).catch(() => {});
-    notify(`Switched to ${roleMeta[r].label}`);
+    if (!skipDemo) {
+      authApi.demoLogin(r).catch(() => {});
+    }
+    notify(`Switched to ${roleMeta[r]?.label || r}`);
   };
 
   // Content switcher

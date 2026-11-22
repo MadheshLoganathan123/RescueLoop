@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
+from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -12,7 +13,45 @@ from backend.app.auth.dependencies import get_current_user
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/login", response_model=Token)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(request: Request, db: AsyncSession = Depends(get_db)):
+    email_val = None
+    password_val = None
+
+    content_type = request.headers.get("content-type", "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            email_val = body.get("email") or body.get("username")
+            password_val = body.get("password")
+        except Exception:
+            pass
+    elif "form" in content_type:
+        try:
+            form = await request.form()
+            email_val = form.get("username") or form.get("email")
+            password_val = form.get("password")
+        except Exception:
+            pass
+
+    if not email_val or not password_val:
+        try:
+            body = await request.json()
+            email_val = email_val or body.get("email") or body.get("username")
+            password_val = password_val or body.get("password")
+        except Exception:
+            try:
+                form = await request.form()
+                email_val = email_val or form.get("username") or form.get("email")
+                password_val = password_val or form.get("password")
+            except Exception:
+                pass
+
+    if not email_val or not password_val:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Email/username and password are required"
+        )
+
     result = await db.execute(
         select(User)
         .options(
@@ -20,11 +59,11 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
             selectinload(User.ngo_profile),
             selectinload(User.volunteer_profile)
         )
-        .where(User.email == req.email.lower().strip())
+        .where(User.email == str(email_val).lower().strip())
     )
     user = result.scalars().first()
 
-    if not user or not verify_password(req.password, user.hashed_password):
+    if not user or not verify_password(str(password_val), user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
@@ -41,13 +80,23 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         org_name = "RescueLoop Command Central"
 
     token = create_access_token(subject=user.id, role=user.role)
+    user_data = {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "phone": user.phone,
+        "organization_name": org_name,
+    }
+
     return Token(
         access_token=token,
         token_type="bearer",
         role=user.role,
         user_id=user.id,
         full_name=user.full_name,
-        organization_name=org_name
+        organization_name=org_name,
+        user=user_data
     )
 
 @router.post("/register", response_model=UserOut)
@@ -85,7 +134,9 @@ async def register(req: UserCreate, db: AsyncSession = Depends(get_db)):
             organization_name=org_name,
             address=address,
             contact_person=new_user.full_name,
-            contact_phone=new_user.phone or "+91 98402 44550"
+            contact_phone=new_user.phone or "+91 98402 44550",
+            daily_capacity_meals=150,
+            current_free_capacity=150
         )
         db.add(ngo_prof)
     elif new_user.role == "volunteer":
@@ -97,7 +148,13 @@ async def register(req: UserCreate, db: AsyncSession = Depends(get_db)):
 
     await db.commit()
     await db.refresh(new_user)
-    return new_user
+
+    token = create_access_token(subject=new_user.id, role=new_user.role)
+    user_out = UserOut.model_validate(new_user)
+    user_out.organization_name = org_name
+    user_out.access_token = token
+    user_out.token_type = "bearer"
+    return user_out
 
 @router.post("/demo-login/{role}", response_model=Token)
 async def demo_login(role: str, db: AsyncSession = Depends(get_db)):
@@ -126,13 +183,23 @@ async def demo_login(role: str, db: AsyncSession = Depends(get_db)):
         org_name = "RescueLoop Command Central"
 
     token = create_access_token(subject=user.id, role=user.role)
+    user_data = {
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role": user.role,
+        "phone": user.phone,
+        "organization_name": org_name,
+    }
+
     return Token(
         access_token=token,
         token_type="bearer",
         role=user.role,
         user_id=user.id,
         full_name=user.full_name,
-        organization_name=org_name
+        organization_name=org_name,
+        user=user_data
     )
 
 @router.get("/me", response_model=UserOut)
